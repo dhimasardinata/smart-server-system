@@ -1,6 +1,7 @@
 const CONFIG_KEY = 'smart-server-sheet-id';
 const DEFAULT_SHEET_ID = '1OjxwAK8oesknw5RHOvnRcrh6mAZCzVf5kH0vnfPLq4E';
 const REFRESH_INTERVAL = 60000;
+const NOTIF_KEY = 'smart-server-notif';
 
 const el = {
     statusDot: document.getElementById('status-dot'),
@@ -8,8 +9,15 @@ const el = {
     refreshBtn: document.getElementById('refresh-btn'),
     tempValue: document.getElementById('temp-value'),
     humValue: document.getElementById('hum-value'),
+    rssiValue: document.getElementById('rssi-value'),
+    tempThreshold: document.getElementById('temp-threshold'),
+    humThreshold: document.getElementById('hum-threshold'),
+    rssiQuality: document.getElementById('rssi-quality'),
+    tempCard: document.getElementById('temp-card'),
+    humCard: document.getElementById('hum-card'),
     alarmState: document.getElementById('alarm-state'),
-    fanState: document.getElementById('fan-state'),
+    fan1State: document.getElementById('fan1-state'),
+    fan2State: document.getElementById('fan2-state'),
     doorState: document.getElementById('door-state'),
     grantedCount: document.getElementById('granted-count'),
     deniedCount: document.getElementById('denied-count'),
@@ -18,74 +26,133 @@ const el = {
     telemetryBody: document.getElementById('telemetry-body'),
     accessBody: document.getElementById('access-body'),
     sheetId: document.getElementById('sheet-id'),
+    notifToggle: document.getElementById('notif-toggle'),
     saveBtn: document.getElementById('save-btn'),
-    configSection: document.getElementById('config-section')
+    toastContainer: document.getElementById('toast-container')
 };
 
 let trendChart = null;
 
 function initChart() {
     const ctx = document.getElementById('trend-chart').getContext('2d');
+
+    const tempGrad = ctx.createLinearGradient(0, 0, 0, 320);
+    tempGrad.addColorStop(0, 'rgba(79, 143, 255, 0.3)');
+    tempGrad.addColorStop(1, 'rgba(79, 143, 255, 0.0)');
+
+    const humGrad = ctx.createLinearGradient(0, 0, 0, 320);
+    humGrad.addColorStop(0, 'rgba(34, 211, 238, 0.25)');
+    humGrad.addColorStop(1, 'rgba(34, 211, 238, 0.0)');
+
     trendChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: [],
             datasets: [
                 {
-                    label: 'Temperature (C)',
+                    label: 'Temp (°C)',
                     data: [],
-                    borderColor: '#36b6ff',
-                    backgroundColor: 'rgba(54, 182, 255, 0.14)',
+                    borderColor: '#4f8fff',
+                    backgroundColor: tempGrad,
                     fill: true,
-                    tension: 0.35,
-                    pointRadius: 1.8
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    borderWidth: 2
                 },
                 {
                     label: 'Humidity (%)',
                     data: [],
-                    borderColor: '#1de9c6',
-                    backgroundColor: 'rgba(29, 233, 198, 0.11)',
+                    borderColor: '#22d3ee',
+                    backgroundColor: humGrad,
                     fill: true,
-                    tension: 0.35,
-                    pointRadius: 1.8
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    borderWidth: 2
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             scales: {
                 x: {
-                    ticks: { color: '#9fb1d4', maxRotation: 0, autoSkipPadding: 14 },
-                    grid: { color: 'rgba(159, 177, 212, 0.14)' }
+                    ticks: { color: '#7c86a2', maxRotation: 0, autoSkipPadding: 24, font: { size: 11 } },
+                    grid: { display: false }
                 },
                 y: {
-                    ticks: { color: '#9fb1d4' },
-                    grid: { color: 'rgba(159, 177, 212, 0.14)' }
+                    ticks: { color: '#7c86a2', font: { size: 11 } },
+                    grid: { color: 'rgba(255, 255, 255, 0.04)', borderDash: [4, 4] },
+                    beginAtZero: false
                 }
             },
             plugins: {
-                legend: { labels: { color: '#dce8ff', boxWidth: 12 } }
+                legend: {
+                    labels: { color: '#eef0f6', usePointStyle: true, boxWidth: 6, font: { size: 11, weight: '600' } },
+                    position: 'top',
+                    align: 'end'
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(6, 8, 15, 0.92)',
+                    titleColor: '#eef0f6',
+                    bodyColor: '#9ca3b8',
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1,
+                    padding: 10,
+                    boxPadding: 4,
+                    usePointStyle: true,
+                    cornerRadius: 8
+                }
             }
         }
     });
 }
 
-function loadSheetId() {
-    const saved = localStorage.getItem(CONFIG_KEY);
-    if (saved) {
-        el.sheetId.value = saved;
-        return saved;
-    }
-    el.sheetId.value = DEFAULT_SHEET_ID;
-    return DEFAULT_SHEET_ID;
+function loadConfig() {
+    const savedSheet = localStorage.getItem(CONFIG_KEY);
+    el.sheetId.value = savedSheet || DEFAULT_SHEET_ID;
+    el.notifToggle.checked = localStorage.getItem(NOTIF_KEY) === 'true';
+    return el.sheetId.value;
 }
 
-function saveSheetId() {
+function saveConfig() {
     const value = (el.sheetId.value || '').trim();
     if (!value) return null;
     localStorage.setItem(CONFIG_KEY, value);
+    localStorage.setItem(NOTIF_KEY, el.notifToggle.checked);
+    showToast('Connected', 'Spreadsheet ID saved', 'success');
     return value;
+}
+
+function showToast(title, message, type = 'warning') {
+    if (!el.notifToggle.checked && type !== 'success') return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+
+    const icons = { danger: '🚨', success: '✅', warning: '🔔' };
+    toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || '🔔'}</div>
+        <div class="toast-content">
+            <div class="toast-title">${title}</div>
+            <div class="toast-msg">${message}</div>
+        </div>
+    `;
+
+    toast.onclick = () => {
+        toast.classList.add('hiding');
+        setTimeout(() => toast.remove(), 350);
+    };
+
+    el.toastContainer.appendChild(toast);
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.classList.add('hiding');
+            setTimeout(() => toast.remove(), 350);
+        }
+    }, 5000);
 }
 
 function parseGvizDate(value) {
@@ -106,13 +173,12 @@ async function fetchSheet(sheetId, sheetName) {
     const response = await fetch(url);
     const text = await response.text();
     const jsonMatch = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
-    if (!jsonMatch) throw new Error(`Invalid response for sheet ${sheetName}`);
+    if (!jsonMatch) throw new Error(`Invalid response for ${sheetName}`);
     return JSON.parse(jsonMatch[1]);
 }
 
 function parseTelemetry(gviz) {
-    const rows = gviz?.table?.rows || [];
-    return rows.map(r => {
+    return (gviz?.table?.rows || []).map(r => {
         const c = r.c || [];
         return {
             timestamp: parseGvizDate(c[0]?.v),
@@ -123,14 +189,15 @@ function parseTelemetry(gviz) {
             fan2On: String(c[5]?.v || '').toLowerCase() === 'true',
             alarmState: String(c[6]?.v || 'NORMAL'),
             doorState: String(c[7]?.v || 'LOCKED'),
-            wifiRssi: Number(c[8]?.v || 0)
+            wifiRssi: Number(c[8]?.v || 0),
+            warnThreshold: c[9]?.v != null ? Number(c[9].v) : null,
+            stage2Threshold: c[10]?.v != null ? Number(c[10].v) : null
         };
     }).filter(x => x.timestamp);
 }
 
 function parseAccess(gviz) {
-    const rows = gviz?.table?.rows || [];
-    return rows.map(r => {
+    return (gviz?.table?.rows || []).map(r => {
         const c = r.c || [];
         return {
             timestamp: parseGvizDate(c[0]?.v),
@@ -149,11 +216,8 @@ function parseAccess(gviz) {
 function fmtTime(dt) {
     if (!dt) return '--';
     return dt.toLocaleString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        day: '2-digit', month: 'short',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
 }
 
@@ -163,58 +227,120 @@ function setStatus(online, text) {
     el.statusText.textContent = text;
 }
 
+function badgeClass(type, value) {
+    const map = {
+        fan: value ? 'badge-on' : 'badge-off',
+        alarm: value === 'ALARM' ? 'badge-alarm' : 'badge-normal',
+        door: value === 'LOCKED' ? 'badge-locked' : 'badge-unlocked',
+        result: { GRANTED: 'badge-granted', DENIED: 'badge-denied', LOCKOUT: 'badge-lockout' }[value] || ''
+    };
+    return map[type] || map;
+}
+
+function rssiQuality(rssi) {
+    if (rssi >= -50) return { text: 'Excellent', cls: 'badge-success' };
+    if (rssi >= -60) return { text: 'Good', cls: 'badge-success' };
+    if (rssi >= -70) return { text: 'Fair', cls: 'badge-warning' };
+    return { text: 'Weak', cls: 'badge-danger' };
+}
+
 function renderTelemetryTable(items) {
     const latest50 = items.slice(-50).reverse();
-    el.telemetryBody.innerHTML = latest50.map(x => `
-      <tr>
-        <td>${fmtTime(x.timestamp)}</td>
-        <td>${x.temperature.toFixed(1)}</td>
-        <td>${x.humidity.toFixed(1)}</td>
-        <td>${x.fan1On ? 'ON' : 'OFF'}</td>
-        <td>${x.fan2On ? 'ON' : 'OFF'}</td>
-        <td>${x.alarmState}</td>
-        <td>${x.doorState}</td>
-      </tr>
-    `).join('');
+    el.telemetryBody.innerHTML = latest50.map(x => {
+        const fan1Cls = badgeClass('fan', x.fan1On);
+        const fan2Cls = badgeClass('fan', x.fan2On);
+        const alarmCls = badgeClass('alarm', x.alarmState);
+        const doorCls = badgeClass('door', x.doorState);
+        return `<tr>
+            <td>${fmtTime(x.timestamp)}</td>
+            <td>${x.temperature.toFixed(1)}</td>
+            <td>${x.humidity.toFixed(1)}</td>
+            <td><span class="badge ${fan1Cls}">${x.fan1On ? 'ON' : 'OFF'}</span></td>
+            <td><span class="badge ${fan2Cls}">${x.fan2On ? 'ON' : 'OFF'}</span></td>
+            <td><span class="badge ${alarmCls}">${x.alarmState}</span></td>
+            <td><span class="badge ${doorCls}">${x.doorState}</span></td>
+        </tr>`;
+    }).join('');
 }
 
 function renderAccessTable(items) {
     const latest50 = items.slice(-50).reverse();
-    el.accessBody.innerHTML = latest50.map(x => `
-      <tr>
-        <td>${fmtTime(x.timestamp)}</td>
-        <td>${x.userId || '-'}</td>
-        <td>${x.displayName || '-'}</td>
-        <td>${x.result || '-'}</td>
-        <td>${x.reason || '-'}</td>
-        <td>${x.failedCount}</td>
-        <td>${x.doorState || '-'}</td>
-      </tr>
-    `).join('');
+    el.accessBody.innerHTML = latest50.map(x => {
+        const resCls = badgeClass('result', x.result);
+        return `<tr>
+            <td>${fmtTime(x.timestamp)}</td>
+            <td>${x.userId || '-'}</td>
+            <td>${x.displayName || '-'}</td>
+            <td><span class="badge ${resCls}">${x.result || '-'}</span></td>
+            <td>${x.reason || '-'}</td>
+            <td>${x.failedCount}</td>
+            <td>${x.doorState || '-'}</td>
+        </tr>`;
+    }).join('');
 }
 
 function updateSummary(telemetry, access) {
     if (telemetry.length === 0) {
         el.tempValue.textContent = '--';
         el.humValue.textContent = '--';
+        el.rssiValue.textContent = '--';
         return;
     }
+
     const latest = telemetry[telemetry.length - 1];
+
     el.tempValue.textContent = latest.temperature.toFixed(1);
     el.humValue.textContent = latest.humidity.toFixed(1);
-    el.alarmState.textContent = `Alarm: ${latest.alarmState}`;
-    el.fanState.textContent = `Fans: F1 ${latest.fan1On ? 'ON' : 'OFF'} | F2 ${latest.fan2On ? 'ON' : 'OFF'}`;
-    el.doorState.textContent = `Door: ${latest.doorState}`;
+    el.rssiValue.textContent = latest.wifiRssi;
+
+    const rq = rssiQuality(latest.wifiRssi);
+    el.rssiQuality.innerHTML = `<span class="badge ${rq.cls}">${rq.text}</span>`;
+
+    if (latest.warnThreshold != null) {
+        el.tempThreshold.textContent = `Warn: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
+    }
+    if (latest.stage2Threshold != null) {
+        el.humThreshold.textContent = `Device thresholds synced from ESP`;
+    }
+
+    el.alarmState.className = `badge ${badgeClass('alarm', latest.alarmState)}`;
+    el.alarmState.textContent = latest.alarmState;
+
+    el.fan1State.className = `badge ${badgeClass('fan', latest.fan1On)}`;
+    el.fan1State.textContent = latest.fan1On ? 'ON' : 'OFF';
+
+    el.fan2State.className = `badge ${badgeClass('fan', latest.fan2On)}`;
+    el.fan2State.textContent = latest.fan2On ? 'ON' : 'OFF';
+
+    el.doorState.className = `badge ${badgeClass('door', latest.doorState)}`;
+    el.doorState.textContent = latest.doorState;
+
+    if (latest.warnThreshold != null && latest.temperature > latest.warnThreshold) {
+        showToast('High Temperature', `${latest.temperature}°C exceeds warn threshold (${latest.warnThreshold}°C)`, 'danger');
+    }
 
     const now = Date.now();
-    const dayAgo = now - 24 * 60 * 60 * 1000;
+    const dayAgo = now - 86400000;
     const access24 = access.filter(x => x.timestamp && x.timestamp.getTime() >= dayAgo);
     const granted = access24.filter(x => x.result === 'GRANTED').length;
     const denied = access24.filter(x => x.result === 'DENIED').length;
     const lockout = access24.filter(x => x.result === 'LOCKOUT').length;
-    el.grantedCount.textContent = `Granted: ${granted}`;
-    el.deniedCount.textContent = `Denied: ${denied}`;
-    el.lockoutCount.textContent = `Lockout: ${lockout}`;
+
+    el.grantedCount.textContent = granted;
+    el.deniedCount.textContent = denied;
+    el.lockoutCount.textContent = lockout;
+
+    if (access.length > 0) {
+        const latestAccess = access[access.length - 1];
+        const oneMinuteAgo = now - 60000;
+        if (latestAccess.timestamp.getTime() >= oneMinuteAgo) {
+            if (latestAccess.result === 'DENIED') {
+                showToast('Access Denied', `Failed attempt by ${latestAccess.userId || 'Unknown'} — ${latestAccess.reason}`, 'warning');
+            } else if (latestAccess.result === 'LOCKOUT') {
+                showToast('System Lockout', `Terminal locked — ${latestAccess.reason}`, 'danger');
+            }
+        }
+    }
 
     const trend = telemetry.slice(-60);
     trendChart.data.labels = trend.map(x =>
@@ -226,9 +352,9 @@ function updateSummary(telemetry, access) {
 }
 
 async function refresh() {
-    const sheetId = loadSheetId();
+    const sheetId = loadConfig();
     if (!sheetId) {
-        setStatus(false, 'Spreadsheet not configured');
+        setStatus(false, 'No spreadsheet');
         return;
     }
 
@@ -242,7 +368,7 @@ async function refresh() {
         const access = parseAccess(accessRaw);
 
         if (telemetry.length === 0) {
-            setStatus(false, 'No telemetry data');
+            setStatus(false, 'No data');
             return;
         }
 
@@ -250,23 +376,25 @@ async function refresh() {
         renderTelemetryTable(telemetry);
         renderAccessTable(access);
         setStatus(true, 'Connected');
-        el.lastUpdate.textContent = 'Last update: ' + new Date().toLocaleTimeString('id-ID');
+        el.lastUpdate.textContent = 'Updated: ' + new Date().toLocaleTimeString('id-ID');
     } catch (err) {
         console.error(err);
-        setStatus(false, 'Connection error');
+        setStatus(false, 'Error');
     }
 }
 
 el.saveBtn.addEventListener('click', () => {
-    const id = saveSheetId();
+    const id = saveConfig();
     if (id) refresh();
 });
 
-if (el.refreshBtn) {
-    el.refreshBtn.addEventListener('click', refresh);
-}
+el.notifToggle.addEventListener('change', () => {
+    localStorage.setItem(NOTIF_KEY, el.notifToggle.checked);
+});
+
+if (el.refreshBtn) el.refreshBtn.addEventListener('click', refresh);
 
 initChart();
-loadSheetId();
+loadConfig();
 refresh();
 setInterval(refresh, REFRESH_INTERVAL);

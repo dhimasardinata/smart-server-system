@@ -22,6 +22,8 @@ const TELEMETRY_HEADERS = [
   "alarm_state",
   "door_state",
   "wifi_rssi",
+  "warn_threshold",
+  "stage2_threshold",
 ];
 
 const ACCESS_HEADERS = [
@@ -129,6 +131,8 @@ function buildTelemetryRow(params) {
     requireString(params.alarm_state, "alarm_state"),
     requireString(params.door_state, "door_state"),
     toNumber(params.wifi_rssi, "wifi_rssi"),
+    toNumber(params.warn_threshold, "warn_threshold"),
+    toNumber(params.stage2_threshold, "stage2_threshold"),
   ];
 }
 

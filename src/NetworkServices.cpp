@@ -144,6 +144,8 @@ void NetworkServices::enqueueTelemetry() {
   payload.alarmState = _cachedWarning;
   payload.doorState = doorState();
   payload.wifiRssi = _wifi->getRSSI();
+  payload.warnThreshold = _config->data.warnThresholdC;
+  payload.stage2Threshold = _config->data.stage2ThresholdC;
   enqueueTelemetryPayload(payload);
 }
 

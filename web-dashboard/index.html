@@ -1,84 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Real-time monitoring dashboard for Smart Server System — temperature, humidity, access logs, and device telemetry.">
     <title>Smart Server Cloud Dashboard</title>
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
+
 <body>
-    <div class="bg-grid" aria-hidden="true"></div>
-    <div class="app-shell">
-        <header class="header card">
-            <div>
-                <p class="eyebrow">CV Gundara Solusi Bersama</p>
-                <h1>Smart Server Cloud Dashboard</h1>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="orb orb-1" aria-hidden="true"></div>
+    <div class="orb orb-2" aria-hidden="true"></div>
+
+    <div class="app">
+        <header class="header glass" id="header">
+            <div class="header-brand">
+                <span class="brand-badge">CV Gundara Solusi Bersama</span>
+                <h1>Smart Server<span class="gradient-text"> Cloud</span></h1>
             </div>
-            <div class="header-actions">
-                <button class="btn-secondary" id="refresh-btn" type="button">Refresh</button>
-                <div class="connection-status">
+            <div class="header-controls">
+                <label class="toggle" id="notif-toggle-wrap">
+                    <input type="checkbox" id="notif-toggle">
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-text">Alerts</span>
+                </label>
+                <button class="btn btn-ghost" id="refresh-btn" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                    Refresh
+                </button>
+                <div class="status-chip" id="status-chip">
                     <span class="status-dot" id="status-dot"></span>
                     <span id="status-text">Connecting...</span>
                 </div>
             </div>
         </header>
 
-        <main class="main">
-            <section class="config-section card" id="config-section">
-                <h2>Spreadsheet Config</h2>
-                <div class="config-form">
-                    <div class="form-group">
-                        <label>Google Spreadsheet ID</label>
-                        <input type="text" id="sheet-id" placeholder="1ABC...xyz">
-                        <small>One Spreadsheet with `telemetry_logs` and `access_logs` sheets</small>
+        <section class="config glass" id="config-section">
+            <div class="config-inner">
+                <div class="config-field">
+                    <label for="sheet-id">Spreadsheet ID</label>
+                    <input type="text" id="sheet-id" placeholder="1ABC...xyz" spellcheck="false">
+                </div>
+                <button class="btn btn-primary" id="save-btn">Connect</button>
+            </div>
+        </section>
+
+        <main class="dashboard">
+            <section class="metrics">
+                <article class="metric-card glass" id="temp-card">
+                    <div class="metric-header">
+                        <span class="metric-icon temp-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+                        </span>
+                        <span class="metric-label">Temperature</span>
                     </div>
-                    <button class="btn-primary" id="save-btn">Connect & Save</button>
-                </div>
+                    <div class="metric-body">
+                        <span class="metric-value" id="temp-value">--</span>
+                        <span class="metric-unit">°C</span>
+                    </div>
+                    <div class="metric-threshold" id="temp-threshold"></div>
+                </article>
+
+                <article class="metric-card glass" id="hum-card">
+                    <div class="metric-header">
+                        <span class="metric-icon hum-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                        </span>
+                        <span class="metric-label">Humidity</span>
+                    </div>
+                    <div class="metric-body">
+                        <span class="metric-value" id="hum-value">--</span>
+                        <span class="metric-unit">%</span>
+                    </div>
+                    <div class="metric-threshold" id="hum-threshold"></div>
+                </article>
+
+                <article class="metric-card glass" id="rssi-card">
+                    <div class="metric-header">
+                        <span class="metric-icon rssi-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                        </span>
+                        <span class="metric-label">WiFi Signal</span>
+                    </div>
+                    <div class="metric-body">
+                        <span class="metric-value" id="rssi-value">--</span>
+                        <span class="metric-unit">dBm</span>
+                    </div>
+                    <div class="metric-threshold" id="rssi-quality"></div>
+                </article>
             </section>
 
-            <section class="top-grid">
-                <article class="gauge-card card">
-                    <div class="gauge-label">Temperature</div>
-                    <div class="gauge-value" id="temp-value">--</div>
-                    <div class="gauge-unit">°C</div>
-                </article>
-                <article class="gauge-card card">
-                    <div class="gauge-label">Humidity</div>
-                    <div class="gauge-value" id="hum-value">--</div>
-                    <div class="gauge-unit">%</div>
-                </article>
-                <article class="state-card card">
+            <section class="state-row">
+                <article class="state-card glass">
                     <h3>Thermal State</h3>
-                    <p class="state-line" id="alarm-state">Alarm: --</p>
-                    <p class="state-line" id="fan-state">Fans: --</p>
-                    <p class="state-line" id="door-state">Door: --</p>
+                    <div class="state-items">
+                        <div class="state-item">
+                            <span class="state-key">Alarm</span>
+                            <span class="badge" id="alarm-state">--</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-key">Fan 1</span>
+                            <span class="badge" id="fan1-state">--</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-key">Fan 2</span>
+                            <span class="badge" id="fan2-state">--</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-key">Door</span>
+                            <span class="badge" id="door-state">--</span>
+                        </div>
+                    </div>
                 </article>
-                <article class="state-card card">
-                    <h3>Access Summary (24h)</h3>
-                    <p class="state-line" id="granted-count">Granted: 0</p>
-                    <p class="state-line" id="denied-count">Denied: 0</p>
-                    <p class="state-line" id="lockout-count">Lockout: 0</p>
+
+                <article class="state-card glass">
+                    <h3>Access Summary <span class="badge badge-muted">24h</span></h3>
+                    <div class="state-items">
+                        <div class="state-item">
+                            <span class="state-key">Granted</span>
+                            <span class="badge badge-success" id="granted-count">0</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-key">Denied</span>
+                            <span class="badge badge-danger" id="denied-count">0</span>
+                        </div>
+                        <div class="state-item">
+                            <span class="state-key">Lockout</span>
+                            <span class="badge badge-warning" id="lockout-count">0</span>
+                        </div>
+                    </div>
                 </article>
             </section>
 
-            <section class="chart-section card">
-                <div class="chart-header">
+            <section class="chart-panel glass">
+                <div class="panel-header">
                     <h2>Telemetry Trend</h2>
-                    <span id="last-update">Last update: --</span>
+                    <span class="chip" id="last-update">Last update: --</span>
                 </div>
-                <div class="chart-container">
-                    <canvas id="trend-chart" role="img" aria-label="Temperature and humidity trend chart">Temperature and humidity trend chart</canvas>
+                <div class="chart-wrap">
+                    <canvas id="trend-chart" role="img" aria-label="Temperature and humidity trend chart"></canvas>
                 </div>
             </section>
 
-            <section class="table-section card">
-                <div class="table-header">
-                    <h2>Telemetry Logs (latest 50)</h2>
+            <section class="table-panel glass">
+                <div class="panel-header">
+                    <h2>Telemetry Logs</h2>
+                    <span class="chip">Latest 50</span>
                 </div>
-                <div class="table-wrap">
-                    <table class="history-table">
+                <div class="table-scroll">
+                    <table id="telemetry-table">
                         <thead>
                             <tr>
                                 <th>Time</th>
@@ -95,12 +169,13 @@
                 </div>
             </section>
 
-            <section class="table-section card">
-                <div class="table-header">
-                    <h2>Access Logs (latest 50)</h2>
+            <section class="table-panel glass">
+                <div class="panel-header">
+                    <h2>Access Logs</h2>
+                    <span class="chip">Latest 50</span>
                 </div>
-                <div class="table-wrap">
-                    <table class="history-table">
+                <div class="table-scroll">
+                    <table id="access-table">
                         <thead>
                             <tr>
                                 <th>Time</th>
@@ -119,6 +194,9 @@
         </main>
     </div>
 
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
     <script src="app.js"></script>
 </body>
+
 </html>

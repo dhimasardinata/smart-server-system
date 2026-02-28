@@ -72,6 +72,8 @@ bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
   url += "&alarm_state=" + String(payload.alarmState ? "ALARM" : "NORMAL");
   url += "&door_state=" + urlEncode(payload.doorState);
   url += "&wifi_rssi=" + String(payload.wifiRssi);
+  url += "&warn_threshold=" + String(payload.warnThreshold, 1);
+  url += "&stage2_threshold=" + String(payload.stage2Threshold, 1);
   return sendGetRequest(url);
 }
 
