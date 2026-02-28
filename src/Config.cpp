@@ -5,7 +5,7 @@ constexpr const char* DEFAULT_ADMIN_HASH =
     "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";  // 1234
 constexpr const char* DEFAULT_DEVICE_ID = "esp32-smart-server-01";
 constexpr const char* DEFAULT_GSCRIPT_URL =
-    "https://script.google.com/macros/s/AKfycbzz3_8YqkZwUyZtEdFR7MEVC0pksoArF_B4KlOYuDeKwOctd6fZmMGkL4cmrbcdPxia/exec";
+    "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec";
 
 bool isStrictSchemaValid(const JsonDocument& doc) {
   return doc[ConfigKeys::WIFI_NETWORKS].is<JsonArray>() &&

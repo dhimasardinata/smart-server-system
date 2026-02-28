@@ -1,5 +1,5 @@
 const CONFIG_KEY = 'smart-server-sheet-id';
-const DEFAULT_SHEET_ID = '1OjxwAK8oesknw5RHOvnRcrh6mAZCzVf5kH0vnfPLq4E';
+const DEFAULT_SHEET_ID = '1rKF8ZZWsYCXlh_yixmdfKyZA6omkj64F5pEjiMcfAw8';
 const REFRESH_INTERVAL = 60000;
 const NOTIF_KEY = 'smart-server-notif';
 const PAGE_SIZE = 10;

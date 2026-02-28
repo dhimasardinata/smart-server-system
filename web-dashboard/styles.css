@@ -296,7 +296,7 @@ body {
 
 .config-inner {
     display: flex;
-    align-items: stretch;
+    align-items: flex-end;
     gap: 12px;
 }
 
