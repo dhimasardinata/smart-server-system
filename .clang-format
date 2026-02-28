@@ -1,0 +1,43 @@
+# AutoFeeder Code Style
+# Based on Google style with minor tweaks for embedded
+
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 80
+UseTab: Never
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: true
+AlignTrailingComments: true
+
+# Braces
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^".*\.h"'
+    Priority: 1
+  - Regex: '^<Arduino\.h>'
+    Priority: 2
+  - Regex: '^<.*>'
+    Priority: 3
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesInAngles: false
+
+# Other
+PointerAlignment: Left
+DerivePointerAlignment: false
+ReflowComments: true
