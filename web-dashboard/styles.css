@@ -693,7 +693,10 @@ tbody tr:last-child td {
     }
 
     .config { padding: 14px 18px; }
-    .config-inner { flex-direction: column; }
+    .config-inner {
+        flex-direction: column;
+        align-items: stretch;
+    }
     .config-inner .btn { width: 100%; justify-content: center; }
 
     .metrics { grid-template-columns: 1fr; }
