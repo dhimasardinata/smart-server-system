@@ -66,6 +66,11 @@ void AccessController::begin(ConfigManager* config) {
                                      Pins::KEYPAD_ROWS, Pins::KEYPAD_COLS);
 }
 
+char AccessController::getKey() {
+  if (_keypad == nullptr) return NO_KEY;
+  return _keypad->getKey();
+}
+
 bool AccessController::upsertUser(const String& userId, const String& displayName,
                                   const String& pin, bool enabled,
                                   String& error) {
@@ -93,6 +98,105 @@ bool AccessController::upsertUser(const String& userId, const String& displayNam
     return false;
   }
   return true;
+}
+
+AuthResult AccessController::validatePin(const String& pin) {
+  AuthResult result;
+  if (_config == nullptr || !isValidPinFormat(pin)) return result;
+
+  const String hash = hashPinSha256(pin);
+  for (const auto& user : _config->data.users) {
+    if (!user.enabled || user.userId.length() == 0) continue;
+    if (user.pinHash == hash) {
+      result.success = true;
+      result.userId = user.userId;
+      result.displayName = user.displayName;
+      result.isAdmin = (user.userId == _config->data.users[0].userId);
+
+      _failedAttempts = 0;
+      _lastMessage = "ACCESS GRANTED";
+      _unlockRequested = true;
+
+      AccessEvent event;
+      event.type = AccessEventType::AccessGranted;
+      event.userId = user.userId;
+      event.displayName = user.displayName;
+      event.result = "GRANTED";
+      event.reason = "VALID_PIN";
+      event.failedCount = 0;
+      pushEvent(event);
+      return result;
+    }
+  }
+
+  _failedAttempts++;
+  _lastMessage = "ACCESS DENIED";
+
+  AccessEvent denied;
+  denied.type = AccessEventType::AccessDenied;
+  denied.result = "DENIED";
+  denied.reason = "INVALID_PIN";
+  denied.failedCount = _failedAttempts;
+  pushEvent(denied);
+
+  if (_config != nullptr && _failedAttempts >= _config->data.maxFailedAttempts) {
+    _lockoutUntilMs = millis() + (_config->data.keypadLockoutSec * 1000UL);
+    _failedAttempts = 0;
+    _lastMessage = "LOCKOUT ACTIVE";
+
+    AccessEvent lockout;
+    lockout.type = AccessEventType::LockoutStarted;
+    lockout.result = "LOCKOUT";
+    lockout.reason = "MAX_FAILED_ATTEMPTS";
+    lockout.failedCount = _config->data.maxFailedAttempts;
+    lockout.lockoutUntilEpoch = static_cast<uint32_t>(time(nullptr)) +
+                                _config->data.keypadLockoutSec;
+    pushEvent(lockout);
+  }
+
+  return result;
+}
+
+bool AccessController::changePin(const String& userId, const String& newPin,
+                                 String& error) {
+  error = "";
+  if (_config == nullptr) {
+    error = "not initialized";
+    return false;
+  }
+  if (!isValidPinFormat(newPin)) {
+    error = "PIN harus 4-8 digit angka";
+    return false;
+  }
+
+  for (auto& user : _config->data.users) {
+    if (user.userId == userId && user.enabled) {
+      user.pinHash = hashPinSha256(newPin);
+      if (_config->save()) return true;
+      error = "gagal menyimpan";
+      return false;
+    }
+  }
+  error = "user tidak ditemukan";
+  return false;
+}
+
+String AccessController::generateUserId() const {
+  if (_config == nullptr) return "user01";
+  for (int i = 1; i <= 99; ++i) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "user%02d", i);
+    String candidate(buf);
+    bool exists = false;
+    for (const auto& user : _config->data.users) {
+      if (user.userId == candidate) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) return candidate;
+  }
+  return "user99";
 }
 
 bool AccessController::consumeUnlockRequest() {
@@ -134,92 +238,4 @@ void AccessController::update() {
     _lastMessage = "LOCKOUT ENDED";
   }
   _lockoutWasActive = lockoutNow;
-
-  if (_keypad == nullptr) return;
-  const char key = _keypad->getKey();
-  if (key != NO_KEY) handleKey(key);
-}
-
-void AccessController::handleKey(char key) {
-  if (isLockoutActive()) {
-    _lastMessage = "LOCKED " + String(lockoutRemainingSec()) + "s";
-    return;
-  }
-
-  if (key >= '0' && key <= '9') {
-    if (_pinBuffer.length() < PIN_MAX_LEN) _pinBuffer += key;
-    return;
-  }
-
-  if (key == '*') {
-    _pinBuffer = "";
-    _lastMessage = "INPUT CLEARED";
-    return;
-  }
-
-  if (key == '#') submitPin();
-}
-
-bool AccessController::checkPin(const String& pin, UserCredential& matchedUser) const {
-  if (_config == nullptr) return false;
-  const String hash = hashPinSha256(pin);
-  for (const auto& user : _config->data.users) {
-    if (!user.enabled || user.userId.length() == 0) continue;
-    if (user.pinHash == hash) {
-      matchedUser = user;
-      return true;
-    }
-  }
-  return false;
-}
-
-void AccessController::submitPin() {
-  if (!isValidPinFormat(_pinBuffer)) {
-    _lastMessage = "PIN INVALID";
-    _pinBuffer = "";
-    return;
-  }
-
-  UserCredential matchedUser;
-  if (checkPin(_pinBuffer, matchedUser)) {
-    _failedAttempts = 0;
-    _lastMessage = "ACCESS GRANTED";
-    _unlockRequested = true;
-
-    AccessEvent event;
-    event.type = AccessEventType::AccessGranted;
-    event.userId = matchedUser.userId;
-    event.displayName = matchedUser.displayName;
-    event.result = "GRANTED";
-    event.reason = "VALID_PIN";
-    event.failedCount = 0;
-    pushEvent(event);
-  } else {
-    _failedAttempts++;
-    _lastMessage = "ACCESS DENIED";
-
-    AccessEvent denied;
-    denied.type = AccessEventType::AccessDenied;
-    denied.result = "DENIED";
-    denied.reason = "INVALID_PIN";
-    denied.failedCount = _failedAttempts;
-    pushEvent(denied);
-
-    if (_config != nullptr && _failedAttempts >= _config->data.maxFailedAttempts) {
-      _lockoutUntilMs = millis() + (_config->data.keypadLockoutSec * 1000UL);
-      _failedAttempts = 0;
-      _lastMessage = "LOCKOUT ACTIVE";
-
-      AccessEvent lockout;
-      lockout.type = AccessEventType::LockoutStarted;
-      lockout.result = "LOCKOUT";
-      lockout.reason = "MAX_FAILED_ATTEMPTS";
-      lockout.failedCount = _config->data.maxFailedAttempts;
-      lockout.lockoutUntilEpoch = static_cast<uint32_t>(time(nullptr)) +
-                                  _config->data.keypadLockoutSec;
-      pushEvent(lockout);
-    }
-  }
-
-  _pinBuffer = "";
 }

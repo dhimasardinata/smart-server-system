@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "Config.h"
 
 #include <time.h>
 
@@ -24,6 +25,12 @@ void Display::clear() {
   _lcd.clear();
 }
 
+void Display::clearRow(uint8_t row) {
+  if (!_ready) return;
+  _lcd.setCursor(0, row);
+  for (uint8_t i = 0; i < _cols; ++i) _lcd.write(' ');
+}
+
 void Display::print(uint8_t col, uint8_t row, std::string_view text) {
   if (!_ready) return;
   _lcd.setCursor(col, row);
@@ -35,6 +42,15 @@ void Display::printCenter(uint8_t row, std::string_view text) {
   uint8_t col = (text.length() < _cols) ? (_cols - text.length()) / 2 : 0;
   _lcd.setCursor(col, row);
   for (char c : text) _lcd.write(c);
+}
+
+void Display::printRow(uint8_t row, const char* text) {
+  if (!_ready) return;
+  _lcd.setCursor(0, row);
+  size_t len = strlen(text);
+  for (size_t i = 0; i < _cols; ++i) {
+    _lcd.write(i < len ? text[i] : ' ');
+  }
 }
 
 void Display::showStartup() {
@@ -127,34 +143,159 @@ void Display::showMainScreen() {
   } else {
     snprintf(row1, sizeof(row1), "T:---- H:----");
   }
-  _lcd.setCursor(0, 1);
-  _lcd.print(row1);
-  for (size_t i = strlen(row1); i < _cols; ++i) _lcd.write(' ');
+  printRow(1, row1);
 
-  String row2 = "F1:";
-  row2 += _fan1On ? "ON " : "OFF";
-  row2 += " F2:";
-  row2 += _fan2On ? "ON " : "OFF";
-  row2 += " ";
-  row2 += _warning ? "WARN" : "NORM";
-  _lcd.setCursor(0, 2);
-  _lcd.print(row2);
-  for (size_t i = row2.length(); i < _cols; ++i) _lcd.write(' ');
+  char row2[24];
+  snprintf(row2, sizeof(row2), "F1:%s F2:%s %s",
+           _fan1On ? "ON " : "OFF", _fan2On ? "ON " : "OFF",
+           _warning ? "WARN" : "NORM");
+  printRow(2, row2);
 
-  String row3 = "D:";
-  row3 += _doorState;
-  row3 += " ";
+  char row3[24];
   if (_lockoutActive) {
-    row3 += "LCK ";
-    row3 += String(_lockoutRemainSec);
-    row3 += "s";
+    snprintf(row3, sizeof(row3), "D:%s LCK %lus",
+             _doorState.c_str(), static_cast<unsigned long>(_lockoutRemainSec));
   } else {
-    row3 += _accessMessage;
+    snprintf(row3, sizeof(row3), "D:%-8s %s",
+             _doorState.c_str(), _accessMessage.c_str());
   }
-  if (row3.length() > _cols) row3 = row3.substring(0, _cols);
-  _lcd.setCursor(0, 3);
-  _lcd.print(row3);
-  for (size_t i = row3.length(); i < _cols; ++i) _lcd.write(' ');
+  if (strlen(row3) > _cols) row3[_cols] = '\0';
+  printRow(3, row3);
+}
+
+void Display::showPinEntry(uint8_t pinLen, bool lockout, uint32_t lockSec) {
+  if (!_ready) return;
+  clear();
+  printCenter(0, "== MASUKKAN PIN ==");
+
+  if (lockout) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "TERKUNCI %lud", static_cast<unsigned long>(lockSec));
+    printCenter(2, buf);
+    return;
+  }
+
+  char pinStr[16] = "PIN: ";
+  size_t offset = 5;
+  for (uint8_t i = 0; i < pinLen && offset < 14; ++i) pinStr[offset++] = '*';
+  pinStr[offset] = '\0';
+  printRow(2, pinStr);
+  printRow(3, "[*] Batal  [#] OK");
+}
+
+void Display::showUnlockOk(const String& name) {
+  if (!_ready) return;
+  clear();
+  printCenter(0, "== AKSES DITERIMA ==");
+  printCenter(2, "Selamat datang,");
+  String truncated = name.substring(0, _cols);
+  printCenter(3, std::string_view(truncated.c_str(), truncated.length()));
+}
+
+void Display::showAdminMenu() {
+  if (!_ready) return;
+  clear();
+  printRow(0, "== MENU ADMIN ==");
+  printRow(1, "1.Pintu  2.GantiPIN");
+  printRow(2, "3.TambahUsr 4.Hapus");
+  printRow(3, "[*] Kembali");
+}
+
+void Display::showUserList(const UserCredential* users, size_t maxUsers, uint8_t action) {
+  if (!_ready) return;
+  clear();
+
+  const char* title = action == 0 ? "== GANTI PIN ==" : "== HAPUS USER ==";
+  printRow(0, title);
+
+  uint8_t slot = 1;
+  uint8_t row = 1;
+  for (size_t i = 0; i < maxUsers && row <= 2; ++i) {
+    if (users[i].userId.length() == 0 || !users[i].enabled) continue;
+    if (action == 1 && i == 0) continue;
+
+    char buf[24];
+    String uid = users[i].userId.substring(0, 8);
+    snprintf(buf, sizeof(buf), "%d.%-9s", slot, uid.c_str());
+
+    if (slot % 2 == 1) {
+      _lcd.setCursor(0, row);
+      _lcd.print(buf);
+    } else {
+      _lcd.setCursor(10, row);
+      _lcd.print(buf);
+      ++row;
+    }
+    ++slot;
+  }
+
+  printRow(3, "[*] Batal");
+}
+
+void Display::showChangePin(const String& userId, uint8_t step, uint8_t len) {
+  if (!_ready) return;
+  clear();
+
+  char title[24];
+  String uid = userId.substring(0, 10);
+  snprintf(title, sizeof(title), "PIN: %s", uid.c_str());
+  printRow(0, title);
+
+  if (step == 0) {
+    char buf[24] = "PIN Baru: ";
+    size_t offset = 10;
+    for (uint8_t i = 0; i < len && offset < 19; ++i) buf[offset++] = '*';
+    buf[offset] = '\0';
+    printRow(1, buf);
+    clearRow(2);
+  } else {
+    printRow(1, "PIN Baru: OK");
+    char buf[24] = "Konfirmasi: ";
+    size_t offset = 12;
+    for (uint8_t i = 0; i < len && offset < 19; ++i) buf[offset++] = '*';
+    buf[offset] = '\0';
+    printRow(2, buf);
+  }
+
+  printRow(3, "[*] Batal  [#] OK");
+}
+
+void Display::showAddUser(const String& autoId, uint8_t pinLen) {
+  if (!_ready) return;
+  clear();
+  printRow(0, "== TAMBAH USER ==");
+
+  char idRow[24];
+  snprintf(idRow, sizeof(idRow), "ID: %s", autoId.c_str());
+  printRow(1, idRow);
+
+  char pinRow[24] = "PIN: ";
+  size_t offset = 5;
+  for (uint8_t i = 0; i < pinLen && offset < 14; ++i) pinRow[offset++] = '*';
+  pinRow[offset] = '\0';
+  printRow(2, pinRow);
+
+  printRow(3, "[*] Batal  [#] Simpan");
+}
+
+void Display::showConfirmDelete(const String& userId) {
+  if (!_ready) return;
+  clear();
+  printRow(0, "== HAPUS USER? ==");
+
+  char buf[24];
+  snprintf(buf, sizeof(buf), "User: %s", userId.substring(0, 12).c_str());
+  printRow(1, buf);
+  printRow(2, "1.Ya  [*] Batal");
+  clearRow(3);
+}
+
+void Display::showMessage(const char* title, const char* msg, bool success) {
+  if (!_ready) return;
+  clear();
+  printCenter(0, title);
+  printCenter(2, msg);
+  printRow(3, success ? "OK" : "GAGAL");
 }
 
 void Display::loop() {

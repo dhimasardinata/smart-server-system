@@ -117,12 +117,226 @@ void App::updateDisplay(const SensorData& data) {
                        _access.isLockoutActive(), _access.lockoutRemainingSec());
 }
 
+void App::resetToMonitoring() {
+  _uiState = UIState::MONITORING;
+  _pinBuf = "";
+  _confirmBuf = "";
+  _changePinStep = 0;
+  _display.clear();
+}
+
+void App::buildUserSlotMap() {
+  _userSlotCount = 0;
+  for (size_t i = 0; i < MAX_USERS; ++i) {
+    if (_config.data.users[i].userId.length() == 0 ||
+        !_config.data.users[i].enabled)
+      continue;
+    if (_userListAction == 1 && i == 0) continue;
+    if (_userSlotCount < MAX_SLOTS) {
+      _userSlotMap[_userSlotCount++] = static_cast<uint8_t>(i);
+    }
+  }
+}
+
+void App::handleUIKey(char key) {
+  if (key == NO_KEY) return;
+
+  _uiIdleMs = millis();
+
+  switch (_uiState) {
+    case UIState::MONITORING: {
+      if (key == 'A') {
+        _uiState = UIState::PIN_ENTRY;
+        _pinBuf = "";
+        if (_access.isLockoutActive()) {
+          _display.showPinEntry(0, true, _access.lockoutRemainingSec());
+        } else {
+          _display.showPinEntry(0);
+        }
+      }
+      break;
+    }
+
+    case UIState::PIN_ENTRY: {
+      if (_access.isLockoutActive()) {
+        _display.showPinEntry(0, true, _access.lockoutRemainingSec());
+        if (key == '*') resetToMonitoring();
+        break;
+      }
+      if (key >= '0' && key <= '9' && _pinBuf.length() < 8) {
+        _pinBuf += key;
+        _display.showPinEntry(_pinBuf.length());
+      } else if (key == '*') {
+        resetToMonitoring();
+      } else if (key == '#' && _pinBuf.length() >= 4) {
+        AuthResult auth = _access.validatePin(_pinBuf);
+        _pinBuf = "";
+        if (auth.success) {
+          _authUserId = auth.userId;
+          _authDisplayName = auth.displayName;
+          if (auth.isAdmin) {
+            _uiState = UIState::ADMIN_MENU;
+            _display.showAdminMenu();
+          } else {
+            _uiState = UIState::UNLOCK_OK;
+            _unlockOkMs = millis();
+            requestUnlock();
+            _display.showUnlockOk(auth.displayName);
+          }
+        } else {
+          if (_access.isLockoutActive()) {
+            _display.showPinEntry(0, true, _access.lockoutRemainingSec());
+          } else {
+            _display.showMessage("PIN SALAH", "Coba lagi", false);
+            delay(1500);
+            _uiState = UIState::PIN_ENTRY;
+            _display.showPinEntry(0);
+          }
+        }
+      }
+      break;
+    }
+
+    case UIState::UNLOCK_OK: {
+      resetToMonitoring();
+      break;
+    }
+
+    case UIState::ADMIN_MENU: {
+      if (key == '*') {
+        resetToMonitoring();
+      } else if (key == '1') {
+        requestUnlock();
+        _uiState = UIState::UNLOCK_OK;
+        _unlockOkMs = millis();
+        _display.showUnlockOk(_authDisplayName);
+      } else if (key == '2') {
+        _userListAction = 0;
+        buildUserSlotMap();
+        _uiState = UIState::USER_LIST;
+        _display.showUserList(_config.data.users, MAX_USERS, 0);
+      } else if (key == '3') {
+        _autoUserId = _access.generateUserId();
+        _pinBuf = "";
+        _uiState = UIState::ADD_USER;
+        _display.showAddUser(_autoUserId, 0);
+      } else if (key == '4') {
+        _userListAction = 1;
+        buildUserSlotMap();
+        _uiState = UIState::USER_LIST;
+        _display.showUserList(_config.data.users, MAX_USERS, 1);
+      }
+      break;
+    }
+
+    case UIState::USER_LIST: {
+      if (key == '*') {
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      } else if (key >= '1' && key <= '9') {
+        uint8_t slot = key - '1';
+        if (slot < _userSlotCount) {
+          uint8_t idx = _userSlotMap[slot];
+          _selectedUserId = _config.data.users[idx].userId;
+          if (_userListAction == 0) {
+            _uiState = UIState::CHANGE_PIN;
+            _changePinStep = 0;
+            _pinBuf = "";
+            _confirmBuf = "";
+            _display.showChangePin(_selectedUserId, 0, 0);
+          } else {
+            _uiState = UIState::CONFIRM_DELETE;
+            _display.showConfirmDelete(_selectedUserId);
+          }
+        }
+      }
+      break;
+    }
+
+    case UIState::CHANGE_PIN: {
+      if (key == '*') {
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      } else if (key >= '0' && key <= '9') {
+        if (_changePinStep == 0 && _pinBuf.length() < 8) {
+          _pinBuf += key;
+          _display.showChangePin(_selectedUserId, 0, _pinBuf.length());
+        } else if (_changePinStep == 1 && _confirmBuf.length() < 8) {
+          _confirmBuf += key;
+          _display.showChangePin(_selectedUserId, 1, _confirmBuf.length());
+        }
+      } else if (key == '#') {
+        if (_changePinStep == 0 && _pinBuf.length() >= 4) {
+          _changePinStep = 1;
+          _confirmBuf = "";
+          _display.showChangePin(_selectedUserId, 1, 0);
+        } else if (_changePinStep == 1 && _confirmBuf.length() >= 4) {
+          if (_pinBuf == _confirmBuf) {
+            String error;
+            if (_access.changePin(_selectedUserId, _pinBuf, error)) {
+              _display.showMessage("BERHASIL", "PIN diperbarui", true);
+            } else {
+              _display.showMessage("GAGAL", error.c_str(), false);
+            }
+          } else {
+            _display.showMessage("GAGAL", "PIN tidak cocok", false);
+          }
+          delay(2000);
+          _uiState = UIState::ADMIN_MENU;
+          _display.showAdminMenu();
+        }
+      }
+      break;
+    }
+
+    case UIState::ADD_USER: {
+      if (key == '*') {
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      } else if (key >= '0' && key <= '9' && _pinBuf.length() < 8) {
+        _pinBuf += key;
+        _display.showAddUser(_autoUserId, _pinBuf.length());
+      } else if (key == '#' && _pinBuf.length() >= 4) {
+        String error;
+        if (_access.upsertUser(_autoUserId, _autoUserId, _pinBuf, true, error)) {
+          _display.showMessage("BERHASIL", "User ditambahkan", true);
+        } else {
+          _display.showMessage("GAGAL", error.c_str(), false);
+        }
+        delay(2000);
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      }
+      break;
+    }
+
+    case UIState::CONFIRM_DELETE: {
+      if (key == '*') {
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      } else if (key == '1') {
+        if (_config.removeUser(_selectedUserId)) {
+          _display.showMessage("BERHASIL", "User dihapus", true);
+        } else {
+          _display.showMessage("GAGAL", "Gagal menghapus", false);
+        }
+        delay(2000);
+        _uiState = UIState::ADMIN_MENU;
+        _display.showAdminMenu();
+      }
+      break;
+    }
+  }
+}
+
 void App::loop() {
   _wifi.update();
   _sensors.update();
   _access.update();
 
-  if (_access.consumeUnlockRequest()) requestUnlock();
+  if (_access.consumeUnlockRequest() && _uiState != UIState::UNLOCK_OK) {
+    requestUnlock();
+  }
 
   const SensorData data = _sensors.getData();
   updateThermalAndFans(data);
@@ -137,12 +351,26 @@ void App::loop() {
 
   _network.update(data, _fan1On, _fan2On, _warning, _solenoidOn);
   updateDisplay(data);
-  _display.loop();
 
-  static unsigned long lastDisplayRefresh = 0;
-  if (millis() - lastDisplayRefresh > 1000) {
-    lastDisplayRefresh = millis();
-    _display.showMainScreen();
+  char key = _access.getKey();
+  handleUIKey(key);
+
+  if (_uiState == UIState::MONITORING) {
+    static unsigned long lastDisplayRefresh = 0;
+    if (millis() - lastDisplayRefresh > 1000) {
+      lastDisplayRefresh = millis();
+      _display.showMainScreen();
+    }
+  }
+
+  if (_uiState == UIState::UNLOCK_OK &&
+      millis() - _unlockOkMs > UNLOCK_DISPLAY_MS) {
+    resetToMonitoring();
+  }
+
+  if (_uiState != UIState::MONITORING && _uiState != UIState::UNLOCK_OK &&
+      millis() - _uiIdleMs > UI_TIMEOUT_MS) {
+    resetToMonitoring();
   }
 
   delay(1);

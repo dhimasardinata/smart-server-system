@@ -7,7 +7,6 @@
 #include <deque>
 #include <memory>
 
-// Keypad library defines CLOSED/OPEN macros that conflict with lwIP enums.
 #ifdef CLOSED
 #undef CLOSED
 #endif
@@ -32,10 +31,22 @@ struct AccessEvent {
   uint32_t lockoutUntilEpoch = 0;
 };
 
+struct AuthResult {
+  bool success = false;
+  bool isAdmin = false;
+  String userId;
+  String displayName;
+};
+
 class AccessController {
  public:
   void begin(ConfigManager* config);
   void update();
+
+  char getKey();
+  AuthResult validatePin(const String& pin);
+  bool changePin(const String& userId, const String& newPin, String& error);
+  String generateUserId() const;
 
   [[nodiscard]] bool isLockoutActive() const;
   [[nodiscard]] uint32_t lockoutRemainingSec() const;
@@ -49,6 +60,8 @@ class AccessController {
   bool upsertUser(const String& userId, const String& displayName,
                   const String& pin, bool enabled, String& error);
 
+  ConfigManager* config() const { return _config; }
+
  private:
   ConfigManager* _config = nullptr;
   std::unique_ptr<Keypad> _keypad;
@@ -61,8 +74,5 @@ class AccessController {
   bool _lockoutWasActive = false;
   bool _unlockRequested = false;
 
-  void handleKey(char key);
-  void submitPin();
-  bool checkPin(const String& pin, UserCredential& matchedUser) const;
   void pushEvent(const AccessEvent& event);
 };
