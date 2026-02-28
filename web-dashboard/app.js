@@ -28,7 +28,10 @@ const el = {
     sheetId: document.getElementById('sheet-id'),
     notifToggle: document.getElementById('notif-toggle'),
     saveBtn: document.getElementById('save-btn'),
-    toastContainer: document.getElementById('toast-container')
+    toastContainer: document.getElementById('toast-container'),
+    thWarn: document.getElementById('th-warn'),
+    thAlarm: document.getElementById('th-alarm'),
+    thStatus: document.getElementById('th-status')
 };
 
 let trendChart = null;
@@ -180,16 +183,19 @@ async function fetchSheet(sheetId, sheetName) {
 function parseTelemetry(gviz) {
     return (gviz?.table?.rows || []).map(r => {
         const c = r.c || [];
+        const temp = Number(c[2]?.v);
+        const hum = Number(c[3]?.v);
+        const rssi = Number(c[8]?.v);
         return {
             timestamp: parseGvizDate(c[0]?.v),
             deviceId: String(c[1]?.v || ''),
-            temperature: Number(c[2]?.v || 0),
-            humidity: Number(c[3]?.v || 0),
+            temperature: isFinite(temp) ? temp : 0,
+            humidity: isFinite(hum) ? hum : 0,
             fan1On: String(c[4]?.v || '').toLowerCase() === 'true',
             fan2On: String(c[5]?.v || '').toLowerCase() === 'true',
             alarmState: String(c[6]?.v || 'NORMAL'),
             doorState: String(c[7]?.v || 'LOCKED'),
-            wifiRssi: Number(c[8]?.v || 0),
+            wifiRssi: isFinite(rssi) ? rssi : 0,
             warnThreshold: c[9]?.v != null ? Number(c[9].v) : null,
             stage2Threshold: c[10]?.v != null ? Number(c[10].v) : null
         };
@@ -244,6 +250,8 @@ function rssiQuality(rssi) {
     return { text: 'Weak', cls: 'badge-danger' };
 }
 
+function safeFixed(v) { return isFinite(v) ? v.toFixed(1) : '--'; }
+
 function renderTelemetryTable(items) {
     const latest50 = items.slice(-50).reverse();
     el.telemetryBody.innerHTML = latest50.map(x => {
@@ -253,8 +261,8 @@ function renderTelemetryTable(items) {
         const doorCls = badgeClass('door', x.doorState);
         return `<tr>
             <td>${fmtTime(x.timestamp)}</td>
-            <td>${x.temperature.toFixed(1)}</td>
-            <td>${x.humidity.toFixed(1)}</td>
+            <td>${safeFixed(x.temperature)}</td>
+            <td>${safeFixed(x.humidity)}</td>
             <td><span class="badge ${fan1Cls}">${x.fan1On ? 'ON' : 'OFF'}</span></td>
             <td><span class="badge ${fan2Cls}">${x.fan2On ? 'ON' : 'OFF'}</span></td>
             <td><span class="badge ${alarmCls}">${x.alarmState}</span></td>
@@ -289,18 +297,36 @@ function updateSummary(telemetry, access) {
 
     const latest = telemetry[telemetry.length - 1];
 
-    el.tempValue.textContent = latest.temperature.toFixed(1);
-    el.humValue.textContent = latest.humidity.toFixed(1);
-    el.rssiValue.textContent = latest.wifiRssi;
+    el.tempValue.textContent = safeFixed(latest.temperature);
+    el.humValue.textContent = safeFixed(latest.humidity);
 
-    const rq = rssiQuality(latest.wifiRssi);
-    el.rssiQuality.innerHTML = `<span class="badge ${rq.cls}">${rq.text}</span>`;
-
-    if (latest.warnThreshold != null) {
-        el.tempThreshold.textContent = `Warn: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
+    if (latest.wifiRssi !== 0) {
+        el.rssiValue.textContent = latest.wifiRssi;
+        const rq = rssiQuality(latest.wifiRssi);
+        el.rssiQuality.innerHTML = `<span class="badge ${rq.cls}">${rq.text}</span>`;
+    } else {
+        el.rssiValue.textContent = '--';
+        el.rssiQuality.textContent = '';
     }
-    if (latest.stage2Threshold != null) {
-        el.humThreshold.textContent = `Device thresholds synced from ESP`;
+
+    if (latest.warnThreshold != null && isFinite(latest.warnThreshold)) {
+        el.tempThreshold.textContent = `Warn: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
+        el.humThreshold.textContent = `Thresholds synced from device`;
+        el.thWarn.textContent = `${latest.warnThreshold}°C`;
+        el.thWarn.className = 'badge badge-warning';
+        el.thAlarm.textContent = `${latest.stage2Threshold}°C`;
+        el.thAlarm.className = 'badge badge-danger';
+        el.thStatus.textContent = 'Synced';
+        el.thStatus.className = 'badge badge-success';
+    } else {
+        el.tempThreshold.textContent = 'Threshold: awaiting ESP sync';
+        el.humThreshold.textContent = '';
+        el.thWarn.textContent = '--';
+        el.thWarn.className = 'badge';
+        el.thAlarm.textContent = '--';
+        el.thAlarm.className = 'badge';
+        el.thStatus.textContent = 'Awaiting sync';
+        el.thStatus.className = 'badge badge-muted';
     }
 
     el.alarmState.className = `badge ${badgeClass('alarm', latest.alarmState)}`;

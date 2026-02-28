@@ -296,7 +296,7 @@ body {
 
 .config-inner {
     display: flex;
-    align-items: flex-end;
+    align-items: stretch;
     gap: 12px;
 }
 
@@ -425,7 +425,7 @@ body {
 
 .state-row {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
 }
 
@@ -644,6 +644,7 @@ tbody tr:last-child td {
 
     .config { padding: 14px 18px; }
     .config-inner { flex-direction: column; }
+    .config-inner .btn { width: 100%; justify-content: center; }
 
     .metrics { grid-template-columns: 1fr; }
     .state-row { grid-template-columns: 1fr; }
