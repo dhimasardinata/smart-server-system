@@ -387,6 +387,68 @@ body {
 .hum-icon { background: rgba(34, 211, 238, 0.12); color: var(--cyan); }
 .rssi-icon { background: rgba(52, 211, 153, 0.12); color: var(--green); }
 
+.metric-card.card-warning {
+    border-color: rgba(251, 191, 36, 0.4);
+    box-shadow: 0 0 20px -4px var(--amber-glow), inset 0 0 30px -15px rgba(251, 191, 36, 0.08);
+    animation: glow-amber 2s ease-in-out infinite;
+}
+
+.metric-card.card-alarm {
+    border-color: rgba(248, 113, 113, 0.5);
+    box-shadow: 0 0 24px -4px var(--red-glow), inset 0 0 30px -15px rgba(248, 113, 113, 0.1);
+    animation: glow-red 1.2s ease-in-out infinite;
+}
+
+@keyframes glow-amber {
+    0%, 100% { box-shadow: 0 0 20px -4px var(--amber-glow); }
+    50% { box-shadow: 0 0 32px -2px rgba(251, 191, 36, 0.35); }
+}
+
+@keyframes glow-red {
+    0%, 100% { box-shadow: 0 0 24px -4px var(--red-glow); }
+    50% { box-shadow: 0 0 36px -2px rgba(248, 113, 113, 0.4); }
+}
+
+.alert-banner {
+    padding: 14px 20px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.alert-banner.alert-warning {
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: var(--amber);
+}
+
+.alert-banner.alert-danger {
+    background: rgba(248, 113, 113, 0.1);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    color: var(--red);
+    animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both, pulse-badge 1.5s infinite;
+}
+
+.alert-icon { font-size: 1.5rem; flex-shrink: 0; }
+
+.alert-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.alert-content strong {
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.alert-content span {
+    font-size: 0.78rem;
+    opacity: 0.85;
+}
+
 .metric-label {
     font-size: 0.78rem;
     font-weight: 600;

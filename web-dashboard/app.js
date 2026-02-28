@@ -1,6 +1,6 @@
 const CONFIG_KEY = 'smart-server-sheet-id';
 const DEFAULT_SHEET_ID = '1rKF8ZZWsYCXlh_yixmdfKyZA6omkj64F5pEjiMcfAw8';
-const REFRESH_INTERVAL = 60000;
+const REFRESH_INTERVAL = 15000;
 const NOTIF_KEY = 'smart-server-notif';
 const PAGE_SIZE = 10;
 
@@ -36,7 +36,11 @@ const el = {
     toastContainer: document.getElementById('toast-container'),
     thWarn: document.getElementById('th-warn'),
     thAlarm: document.getElementById('th-alarm'),
-    thStatus: document.getElementById('th-status')
+    thStatus: document.getElementById('th-status'),
+    alertBanner: document.getElementById('alert-banner'),
+    alertIcon: document.getElementById('alert-icon'),
+    alertTitle: document.getElementById('alert-title'),
+    alertMsg: document.getElementById('alert-msg')
 };
 
 let trendChart = null;
@@ -347,6 +351,34 @@ function renderAccessTable(items, page) {
     });
 }
 
+function updateAlertState(latest) {
+    el.tempCard.classList.remove('card-warning', 'card-alarm');
+
+    const hasThresholds = latest.warnThreshold != null && isFinite(latest.warnThreshold);
+    const isAlarm = latest.alarmState === 'ALARM';
+    const isWarning = hasThresholds && latest.temperature > latest.warnThreshold && !isAlarm;
+    const isOverStage2 = hasThresholds && latest.temperature > latest.stage2Threshold;
+
+    if (isAlarm || isOverStage2) {
+        el.tempCard.classList.add('card-alarm');
+        el.alertBanner.style.display = 'flex';
+        el.alertBanner.className = 'alert-banner alert-danger';
+        el.alertIcon.textContent = '🚨';
+        el.alertTitle.textContent = 'ALARM — Suhu Kritis!';
+        el.alertMsg.textContent = `Suhu saat ini ${safeFixed(latest.temperature)}°C melebihi ambang alarm ${latest.stage2Threshold || '--'}°C. Kedua kipas aktif.`;
+        showToast('Alarm Suhu', `${safeFixed(latest.temperature)}°C melebihi ambang alarm!`, 'danger');
+    } else if (isWarning) {
+        el.tempCard.classList.add('card-warning');
+        el.alertBanner.style.display = 'flex';
+        el.alertBanner.className = 'alert-banner alert-warning';
+        el.alertIcon.textContent = '⚠️';
+        el.alertTitle.textContent = 'Peringatan — Suhu Tinggi';
+        el.alertMsg.textContent = `Suhu saat ini ${safeFixed(latest.temperature)}°C melebihi ambang peringatan ${latest.warnThreshold}°C.`;
+    } else {
+        el.alertBanner.style.display = 'none';
+    }
+}
+
 function updateSummary(telemetry, access) {
     if (telemetry.length === 0) {
         el.tempValue.textContent = '--';
@@ -401,9 +433,7 @@ function updateSummary(telemetry, access) {
     el.doorState.className = `badge ${badgeClass('door', latest.doorState)}`;
     el.doorState.textContent = latest.doorState;
 
-    if (latest.warnThreshold != null && latest.temperature > latest.warnThreshold) {
-        showToast('Suhu Tinggi', `${latest.temperature}°C melebihi ambang peringatan (${latest.warnThreshold}°C)`, 'danger');
-    }
+    updateAlertState(latest);
 
     const now = Date.now();
     const dayAgo = now - 86400000;
