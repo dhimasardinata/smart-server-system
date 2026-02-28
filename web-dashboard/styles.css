@@ -573,6 +573,56 @@ tbody tr:last-child td {
     border-bottom: none;
 }
 
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 14px 16px 6px;
+    flex-wrap: wrap;
+}
+
+.pagination button {
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    min-width: 36px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pagination button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-hover);
+    color: var(--text);
+}
+
+.pagination button.active {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+}
+
+.pagination button:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.pagination .page-info {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 0 8px;
+}
+
 .toast-container {
     position: fixed;
     bottom: 20px;

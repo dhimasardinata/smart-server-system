@@ -2,6 +2,7 @@ const CONFIG_KEY = 'smart-server-sheet-id';
 const DEFAULT_SHEET_ID = '1OjxwAK8oesknw5RHOvnRcrh6mAZCzVf5kH0vnfPLq4E';
 const REFRESH_INTERVAL = 60000;
 const NOTIF_KEY = 'smart-server-notif';
+const PAGE_SIZE = 10;
 
 const el = {
     statusDot: document.getElementById('status-dot'),
@@ -25,6 +26,10 @@ const el = {
     lastUpdate: document.getElementById('last-update'),
     telemetryBody: document.getElementById('telemetry-body'),
     accessBody: document.getElementById('access-body'),
+    telemetryPagination: document.getElementById('telemetry-pagination'),
+    accessPagination: document.getElementById('access-pagination'),
+    telemetryInfo: document.getElementById('telemetry-info'),
+    accessInfo: document.getElementById('access-info'),
     sheetId: document.getElementById('sheet-id'),
     notifToggle: document.getElementById('notif-toggle'),
     saveBtn: document.getElementById('save-btn'),
@@ -35,6 +40,10 @@ const el = {
 };
 
 let trendChart = null;
+let telemetryData = [];
+let accessData = [];
+let telemetryPage = 1;
+let accessPage = 1;
 
 function initChart() {
     const ctx = document.getElementById('trend-chart').getContext('2d');
@@ -53,7 +62,7 @@ function initChart() {
             labels: [],
             datasets: [
                 {
-                    label: 'Temp (°C)',
+                    label: 'Suhu (°C)',
                     data: [],
                     borderColor: '#4f8fff',
                     backgroundColor: tempGrad,
@@ -64,7 +73,7 @@ function initChart() {
                     borderWidth: 2
                 },
                 {
-                    label: 'Humidity (%)',
+                    label: 'Kelembapan (%)',
                     data: [],
                     borderColor: '#22d3ee',
                     backgroundColor: humGrad,
@@ -125,7 +134,7 @@ function saveConfig() {
     if (!value) return null;
     localStorage.setItem(CONFIG_KEY, value);
     localStorage.setItem(NOTIF_KEY, el.notifToggle.checked);
-    showToast('Connected', 'Spreadsheet ID saved', 'success');
+    showToast('Terhubung', 'ID Spreadsheet tersimpan', 'success');
     return value;
 }
 
@@ -176,7 +185,7 @@ async function fetchSheet(sheetId, sheetName) {
     const response = await fetch(url);
     const text = await response.text();
     const jsonMatch = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
-    if (!jsonMatch) throw new Error(`Invalid response for ${sheetName}`);
+    if (!jsonMatch) throw new Error(`Respons tidak valid untuk ${sheetName}`);
     return JSON.parse(jsonMatch[1]);
 }
 
@@ -244,17 +253,51 @@ function badgeClass(type, value) {
 }
 
 function rssiQuality(rssi) {
-    if (rssi >= -50) return { text: 'Excellent', cls: 'badge-success' };
-    if (rssi >= -60) return { text: 'Good', cls: 'badge-success' };
-    if (rssi >= -70) return { text: 'Fair', cls: 'badge-warning' };
-    return { text: 'Weak', cls: 'badge-danger' };
+    if (rssi >= -50) return { text: 'Sangat Baik', cls: 'badge-success' };
+    if (rssi >= -60) return { text: 'Baik', cls: 'badge-success' };
+    if (rssi >= -70) return { text: 'Cukup', cls: 'badge-warning' };
+    return { text: 'Lemah', cls: 'badge-danger' };
 }
 
 function safeFixed(v) { return isFinite(v) ? v.toFixed(1) : '--'; }
 
-function renderTelemetryTable(items) {
-    const latest50 = items.slice(-50).reverse();
-    el.telemetryBody.innerHTML = latest50.map(x => {
+function renderPagination(container, totalItems, currentPage, onPageChange) {
+    const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    let html = `<button ${currentPage <= 1 ? 'disabled' : ''} data-page="${currentPage - 1}">‹</button>`;
+
+    const maxButtons = 5;
+    let start = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+    let end = Math.min(totalPages, start + maxButtons - 1);
+    if (end - start < maxButtons - 1) start = Math.max(1, end - maxButtons + 1);
+
+    for (let i = start; i <= end; i++) {
+        html += `<button class="${i === currentPage ? 'active' : ''}" data-page="${i}">${i}</button>`;
+    }
+
+    html += `<button ${currentPage >= totalPages ? 'disabled' : ''} data-page="${currentPage + 1}">›</button>`;
+    html += `<span class="page-info">${totalItems} data</span>`;
+
+    container.innerHTML = html;
+    container.querySelectorAll('button[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const page = parseInt(btn.dataset.page);
+            if (page >= 1 && page <= totalPages) onPageChange(page);
+        });
+    });
+}
+
+function renderTelemetryTable(items, page) {
+    const allSorted = items.slice().reverse();
+    const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
+    if (page > totalPages) page = totalPages;
+    const start = (page - 1) * PAGE_SIZE;
+    const pageItems = allSorted.slice(start, start + PAGE_SIZE);
+
+    el.telemetryInfo.textContent = `Hal ${page}/${totalPages}`;
+
+    el.telemetryBody.innerHTML = pageItems.map(x => {
         const fan1Cls = badgeClass('fan', x.fan1On);
         const fan2Cls = badgeClass('fan', x.fan2On);
         const alarmCls = badgeClass('alarm', x.alarmState);
@@ -269,11 +312,23 @@ function renderTelemetryTable(items) {
             <td><span class="badge ${doorCls}">${x.doorState}</span></td>
         </tr>`;
     }).join('');
+
+    renderPagination(el.telemetryPagination, allSorted.length, page, (p) => {
+        telemetryPage = p;
+        renderTelemetryTable(telemetryData, p);
+    });
 }
 
-function renderAccessTable(items) {
-    const latest50 = items.slice(-50).reverse();
-    el.accessBody.innerHTML = latest50.map(x => {
+function renderAccessTable(items, page) {
+    const allSorted = items.slice().reverse();
+    const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
+    if (page > totalPages) page = totalPages;
+    const start = (page - 1) * PAGE_SIZE;
+    const pageItems = allSorted.slice(start, start + PAGE_SIZE);
+
+    el.accessInfo.textContent = `Hal ${page}/${totalPages}`;
+
+    el.accessBody.innerHTML = pageItems.map(x => {
         const resCls = badgeClass('result', x.result);
         return `<tr>
             <td>${fmtTime(x.timestamp)}</td>
@@ -285,6 +340,11 @@ function renderAccessTable(items) {
             <td>${x.doorState || '-'}</td>
         </tr>`;
     }).join('');
+
+    renderPagination(el.accessPagination, allSorted.length, page, (p) => {
+        accessPage = p;
+        renderAccessTable(accessData, p);
+    });
 }
 
 function updateSummary(telemetry, access) {
@@ -310,22 +370,22 @@ function updateSummary(telemetry, access) {
     }
 
     if (latest.warnThreshold != null && isFinite(latest.warnThreshold)) {
-        el.tempThreshold.textContent = `Warn: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
-        el.humThreshold.textContent = `Thresholds synced from device`;
+        el.tempThreshold.textContent = `Peringatan: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
+        el.humThreshold.textContent = `Ambang batas tersinkron dari perangkat`;
         el.thWarn.textContent = `${latest.warnThreshold}°C`;
         el.thWarn.className = 'badge badge-warning';
         el.thAlarm.textContent = `${latest.stage2Threshold}°C`;
         el.thAlarm.className = 'badge badge-danger';
-        el.thStatus.textContent = 'Synced';
+        el.thStatus.textContent = 'Tersinkron';
         el.thStatus.className = 'badge badge-success';
     } else {
-        el.tempThreshold.textContent = 'Threshold: awaiting ESP sync';
+        el.tempThreshold.textContent = 'Ambang batas: menunggu sinkron ESP';
         el.humThreshold.textContent = '';
         el.thWarn.textContent = '--';
         el.thWarn.className = 'badge';
         el.thAlarm.textContent = '--';
         el.thAlarm.className = 'badge';
-        el.thStatus.textContent = 'Awaiting sync';
+        el.thStatus.textContent = 'Menunggu sinkron';
         el.thStatus.className = 'badge badge-muted';
     }
 
@@ -342,7 +402,7 @@ function updateSummary(telemetry, access) {
     el.doorState.textContent = latest.doorState;
 
     if (latest.warnThreshold != null && latest.temperature > latest.warnThreshold) {
-        showToast('High Temperature', `${latest.temperature}°C exceeds warn threshold (${latest.warnThreshold}°C)`, 'danger');
+        showToast('Suhu Tinggi', `${latest.temperature}°C melebihi ambang peringatan (${latest.warnThreshold}°C)`, 'danger');
     }
 
     const now = Date.now();
@@ -361,9 +421,9 @@ function updateSummary(telemetry, access) {
         const oneMinuteAgo = now - 60000;
         if (latestAccess.timestamp.getTime() >= oneMinuteAgo) {
             if (latestAccess.result === 'DENIED') {
-                showToast('Access Denied', `Failed attempt by ${latestAccess.userId || 'Unknown'} — ${latestAccess.reason}`, 'warning');
+                showToast('Akses Ditolak', `Percobaan gagal oleh ${latestAccess.userId || 'Tidak Dikenal'} — ${latestAccess.reason}`, 'warning');
             } else if (latestAccess.result === 'LOCKOUT') {
-                showToast('System Lockout', `Terminal locked — ${latestAccess.reason}`, 'danger');
+                showToast('Sistem Terkunci', `Terminal terkunci — ${latestAccess.reason}`, 'danger');
             }
         }
     }
@@ -380,7 +440,7 @@ function updateSummary(telemetry, access) {
 async function refresh() {
     const sheetId = loadConfig();
     if (!sheetId) {
-        setStatus(false, 'No spreadsheet');
+        setStatus(false, 'Spreadsheet belum dikonfigurasi');
         return;
     }
 
@@ -390,22 +450,22 @@ async function refresh() {
             fetchSheet(sheetId, 'access_logs')
         ]);
 
-        const telemetry = parseTelemetry(telemetryRaw);
-        const access = parseAccess(accessRaw);
+        telemetryData = parseTelemetry(telemetryRaw);
+        accessData = parseAccess(accessRaw);
 
-        if (telemetry.length === 0) {
-            setStatus(false, 'No data');
+        if (telemetryData.length === 0) {
+            setStatus(false, 'Tidak ada data');
             return;
         }
 
-        updateSummary(telemetry, access);
-        renderTelemetryTable(telemetry);
-        renderAccessTable(access);
-        setStatus(true, 'Connected');
-        el.lastUpdate.textContent = 'Updated: ' + new Date().toLocaleTimeString('id-ID');
+        updateSummary(telemetryData, accessData);
+        renderTelemetryTable(telemetryData, telemetryPage);
+        renderAccessTable(accessData, accessPage);
+        setStatus(true, 'Terhubung');
+        el.lastUpdate.textContent = 'Diperbarui: ' + new Date().toLocaleTimeString('id-ID');
     } catch (err) {
         console.error(err);
-        setStatus(false, 'Error');
+        setStatus(false, 'Kesalahan koneksi');
     }
 }
 

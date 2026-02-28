@@ -4,11 +4,11 @@ namespace WebPage {
 
 constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Server Setup</title>
+  <title>Pengaturan Smart Server</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{
@@ -64,59 +64,59 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <body>
   <div class="app">
     <div class="card">
-      <h1>Smart Server <span>Setup</span></h1>
-      <div class="row" style="margin-top:0"><a href="/" style="text-decoration:none"><button>← Dashboard</button></a></div>
+      <h1>Smart Server <span>Pengaturan</span></h1>
+      <div class="row" style="margin-top:0"><a href="/" style="text-decoration:none"><button>&larr; Dashboard</button></a></div>
     </div>
 
     <div class="card">
       <h2>WiFi</h2>
       <div id="wifi-list"></div>
       <div class="row">
-        <button onclick="scanWifi()">Scan</button>
-        <input id="wifi-pass" type="password" placeholder="WiFi password" style="max-width:240px">
-        <button onclick="connectWifi()">Connect</button>
+        <button onclick="scanWifi()">Pindai</button>
+        <input id="wifi-pass" type="password" placeholder="Kata sandi WiFi" style="max-width:240px">
+        <button onclick="connectWifi()">Hubungkan</button>
       </div>
       <div class="status" id="wifi-status"></div>
     </div>
 
     <div class="card">
-      <h2>Thermal Config</h2>
+      <h2>Konfigurasi Termal</h2>
       <div class="grid">
-        <div><label>Warn Threshold (C)</label><input id="warn-th" type="number" step="0.1"></div>
-        <div><label>Stage2 Threshold (C)</label><input id="stage2-th" type="number" step="0.1"></div>
-        <div><label>Fan1 Baseline</label><select id="fan1-baseline"><option value="true">ON</option><option value="false">OFF</option></select></div>
-        <div><label>Sensor Interval (s)</label><input id="sensor-int" type="number" min="1"></div>
-        <div><label>Cloud Interval (s)</label><input id="cloud-int" type="number" min="10"></div>
+        <div><label>Ambang Peringatan (C)</label><input id="warn-th" type="number" step="0.1"></div>
+        <div><label>Ambang Alarm (C)</label><input id="stage2-th" type="number" step="0.1"></div>
+        <div><label>Kipas 1 Dasar</label><select id="fan1-baseline"><option value="true">NYALA</option><option value="false">MATI</option></select></div>
+        <div><label>Interval Sensor (d)</label><input id="sensor-int" type="number" min="1"></div>
+        <div><label>Interval Cloud (d)</label><input id="cloud-int" type="number" min="10"></div>
       </div>
-      <div class="row"><button onclick="saveThermal()">Save Thermal</button></div>
+      <div class="row"><button onclick="saveThermal()">Simpan Termal</button></div>
       <div class="status" id="thermal-status"></div>
     </div>
 
     <div class="card">
-      <h2>Security Config</h2>
+      <h2>Konfigurasi Keamanan</h2>
       <div class="grid">
-        <div><label>Max Failed Attempts</label><input id="max-fail" type="number" min="1"></div>
-        <div><label>Lockout (s)</label><input id="lockout-sec" type="number" min="10"></div>
-        <div><label>Solenoid Unlock (s)</label><input id="unlock-sec" type="number" min="1"></div>
-        <div><label>Device ID</label><input id="device-id" type="text"></div>
+        <div><label>Maks Percobaan Gagal</label><input id="max-fail" type="number" min="1"></div>
+        <div><label>Penguncian (d)</label><input id="lockout-sec" type="number" min="10"></div>
+        <div><label>Buka Solenoid (d)</label><input id="unlock-sec" type="number" min="1"></div>
+        <div><label>ID Perangkat</label><input id="device-id" type="text"></div>
       </div>
-      <div class="row"><button onclick="saveSecurity()">Save Security</button></div>
+      <div class="row"><button onclick="saveSecurity()">Simpan Keamanan</button></div>
       <div class="status" id="security-status"></div>
     </div>
 
     <div class="card">
-      <h2>User PIN Management</h2>
+      <h2>Manajemen PIN Pengguna</h2>
       <div class="grid">
-        <div><label>User ID</label><input id="u-id" type="text" placeholder="admin1"></div>
-        <div><label>Display Name</label><input id="u-name" type="text" placeholder="Admin 1"></div>
+        <div><label>ID Pengguna</label><input id="u-id" type="text" placeholder="admin1"></div>
+        <div><label>Nama Tampilan</label><input id="u-name" type="text" placeholder="Admin 1"></div>
         <div><label>PIN (4-8 digit)</label><input id="u-pin" type="password" placeholder="1234"></div>
       </div>
       <div class="row">
-        <button onclick="saveUser()">Add / Update</button>
-        <button onclick="loadUsers()">Refresh</button>
+        <button onclick="saveUser()">Tambah / Ubah</button>
+        <button onclick="loadUsers()">Muat Ulang</button>
       </div>
       <table>
-        <thead><tr><th>User ID</th><th>Name</th><th>Enabled</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID Pengguna</th><th>Nama</th><th>Aktif</th><th>Aksi</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table>
       <div class="status" id="users-status"></div>
@@ -136,7 +136,7 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
       el.textContent = msg;
     }
     async function scanWifi() {
-      setStatus("wifi-status", "Scanning...");
+      setStatus("wifi-status", "Memindai...");
       try {
         const data = await fetchJson("/api/wifi/scan");
         const list = document.getElementById("wifi-list");
@@ -152,21 +152,21 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
           };
           list.appendChild(div);
         });
-        setStatus("wifi-status", "Scan done");
+        setStatus("wifi-status", "Pindai selesai");
       } catch (e) {
-        setStatus("wifi-status", "Scan failed", true);
+        setStatus("wifi-status", "Pindai gagal", true);
       }
     }
     async function connectWifi() {
-      if (!selectedSsid) return setStatus("wifi-status", "Select SSID first", true);
+      if (!selectedSsid) return setStatus("wifi-status", "Pilih SSID terlebih dahulu", true);
       const pass = document.getElementById("wifi-pass").value;
       const data = await fetchJson("/api/wifi/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ssid: selectedSsid, password: pass })
       });
-      if (data.success) setStatus("wifi-status", "Connected: " + data.ip);
-      else setStatus("wifi-status", data.error || "Connect failed", true);
+      if (data.success) setStatus("wifi-status", "Terhubung: " + data.ip);
+      else setStatus("wifi-status", data.error || "Gagal terhubung", true);
     }
     async function loadThermal() {
       const c = await fetchJson("/api/config/thermal");
@@ -189,7 +189,7 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      setStatus("thermal-status", res.ok ? "Saved" : "Save failed", !res.ok);
+      setStatus("thermal-status", res.ok ? "Tersimpan" : "Gagal menyimpan", !res.ok);
     }
     async function loadSecurity() {
       const c = await fetchJson("/api/config/security");
@@ -210,7 +210,7 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      setStatus("security-status", res.ok ? "Saved" : "Save failed", !res.ok);
+      setStatus("security-status", res.ok ? "Tersimpan" : "Gagal menyimpan", !res.ok);
     }
     async function loadUsers() {
       const data = await fetchJson("/api/users");
@@ -218,11 +218,11 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
       body.innerHTML = "";
       (data.users || []).forEach(u => {
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${u.userId}</td><td>${u.displayName || ""}</td><td>${u.enabled ? "Yes" : "No"}</td>
-          <td><button class="danger" onclick="deleteUser('${u.userId}')">Delete</button></td>`;
+        tr.innerHTML = `<td>${u.userId}</td><td>${u.displayName || ""}</td><td>${u.enabled ? "Ya" : "Tidak"}</td>
+          <td><button class="danger" onclick="deleteUser('${u.userId}')">Hapus</button></td>`;
         body.appendChild(tr);
       });
-      setStatus("users-status", `Loaded ${data.count || 0} users`);
+      setStatus("users-status", `${data.count || 0} pengguna dimuat`);
     }
     async function saveUser() {
       const payload = {
@@ -237,21 +237,21 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setStatus("users-status", "User saved");
+        setStatus("users-status", "Pengguna tersimpan");
         document.getElementById("u-pin").value = "";
         loadUsers();
       } else {
         const err = await res.text();
-        setStatus("users-status", "Save failed: " + err, true);
+        setStatus("users-status", "Gagal: " + err, true);
       }
     }
     async function deleteUser(userId) {
       const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
       if (res.ok) {
-        setStatus("users-status", "User deleted");
+        setStatus("users-status", "Pengguna dihapus");
         loadUsers();
       } else {
-        setStatus("users-status", "Delete failed", true);
+        setStatus("users-status", "Gagal menghapus", true);
       }
     }
     scanWifi();
@@ -265,11 +265,11 @@ constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
 
 constexpr const char DASHBOARD_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Server Dashboard</title>
+  <title>Dashboard Smart Server</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{
@@ -313,19 +313,19 @@ constexpr const char DASHBOARD_HTML[] PROGMEM = R"rawliteral(
       <h1>Smart Server <span>Dashboard</span></h1>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">Temperature</div>
+          <div class="metric-label">Suhu</div>
           <div class="metric-val" id="temp">--</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Humidity</div>
+          <div class="metric-label">Kelembapan</div>
           <div class="metric-val" id="hum">--</div>
         </div>
       </div>
-      <div class="info" id="status">Loading...</div>
-      <div class="info" id="security">Security: --</div>
+      <div class="info" id="status">Memuat...</div>
+      <div class="info" id="security">Keamanan: --</div>
       <div class="actions">
-        <button onclick="sendNow()">Send Now</button>
-        <a class="btn" href="/setup">Settings</a>
+        <button onclick="sendNow()">Kirim Sekarang</button>
+        <a class="btn" href="/setup">Pengaturan</a>
       </div>
     </div>
   </div>
@@ -337,11 +337,11 @@ constexpr const char DASHBOARD_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('temp').textContent = d.valid ? d.temperature.toFixed(1) + ' °C' : '--';
         document.getElementById('hum').textContent = d.valid ? d.humidity.toFixed(1) + ' %' : '--';
         document.getElementById('status').textContent =
-          `WiFi: ${d.wifiConnected ? 'ON' : 'OFF'}  |  F1: ${d.fan1On ? 'ON' : 'OFF'}  F2: ${d.fan2On ? 'ON' : 'OFF'}  |  Alarm: ${d.alarm ? 'YES' : 'NO'}  |  Queue: ${d.queueTelemetry}/${d.queueAccess}`;
+          `WiFi: ${d.wifiConnected ? 'ON' : 'OFF'}  |  K1: ${d.fan1On ? 'ON' : 'OFF'}  K2: ${d.fan2On ? 'ON' : 'OFF'}  |  Alarm: ${d.alarm ? 'YA' : 'TIDAK'}  |  Antrean: ${d.queueTelemetry}/${d.queueAccess}`;
         document.getElementById('security').textContent =
-          `Security: ${d.accessMessage || '-'}  |  Lockout: ${d.lockoutActive ? ('YES ' + d.lockoutRemainingSec + 's') : 'NO'}  |  Door: ${d.doorState}`;
+          `Keamanan: ${d.accessMessage || '-'}  |  Terkunci: ${d.lockoutActive ? ('YA ' + d.lockoutRemainingSec + 'd') : 'TIDAK'}  |  Pintu: ${d.doorState}`;
       } catch (e) {
-        document.getElementById('status').textContent = 'Connection error';
+        document.getElementById('status').textContent = 'Kesalahan koneksi';
       }
     }
     async function sendNow() {
