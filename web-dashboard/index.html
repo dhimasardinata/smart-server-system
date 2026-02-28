@@ -5,21 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Server Cloud Dashboard</title>
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="app">
-        <header class="header">
-            <h1>Smart Server Cloud Dashboard</h1>
-            <div class="connection-status">
-                <span class="status-dot" id="status-dot"></span>
-                <span id="status-text">Connecting...</span>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="app-shell">
+        <header class="header card">
+            <div>
+                <p class="eyebrow">CV Gundara Solusi Bersama</p>
+                <h1>Smart Server Cloud Dashboard</h1>
+            </div>
+            <div class="header-actions">
+                <button class="btn-secondary" id="refresh-btn" type="button">Refresh</button>
+                <div class="connection-status">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
             </div>
         </header>
 
         <main class="main">
-            <section class="config-section" id="config-section">
+            <section class="config-section card" id="config-section">
                 <h2>Spreadsheet Config</h2>
                 <div class="config-form">
                     <div class="form-group">
@@ -32,41 +39,41 @@
             </section>
 
             <section class="top-grid">
-                <div class="gauge-card">
+                <article class="gauge-card card">
                     <div class="gauge-label">Temperature</div>
                     <div class="gauge-value" id="temp-value">--</div>
                     <div class="gauge-unit">°C</div>
-                </div>
-                <div class="gauge-card">
+                </article>
+                <article class="gauge-card card">
                     <div class="gauge-label">Humidity</div>
                     <div class="gauge-value" id="hum-value">--</div>
                     <div class="gauge-unit">%</div>
-                </div>
-                <div class="state-card">
+                </article>
+                <article class="state-card card">
                     <h3>Thermal State</h3>
-                    <p id="alarm-state">Alarm: --</p>
-                    <p id="fan-state">Fans: --</p>
-                    <p id="door-state">Door: --</p>
-                </div>
-                <div class="state-card">
+                    <p class="state-line" id="alarm-state">Alarm: --</p>
+                    <p class="state-line" id="fan-state">Fans: --</p>
+                    <p class="state-line" id="door-state">Door: --</p>
+                </article>
+                <article class="state-card card">
                     <h3>Access Summary (24h)</h3>
-                    <p id="granted-count">Granted: 0</p>
-                    <p id="denied-count">Denied: 0</p>
-                    <p id="lockout-count">Lockout: 0</p>
-                </div>
+                    <p class="state-line" id="granted-count">Granted: 0</p>
+                    <p class="state-line" id="denied-count">Denied: 0</p>
+                    <p class="state-line" id="lockout-count">Lockout: 0</p>
+                </article>
             </section>
 
-            <section class="chart-section">
+            <section class="chart-section card">
                 <div class="chart-header">
                     <h2>Telemetry Trend</h2>
                     <span id="last-update">Last update: --</span>
                 </div>
                 <div class="chart-container">
-                    <canvas id="trend-chart"></canvas>
+                    <canvas id="trend-chart" role="img" aria-label="Temperature and humidity trend chart">Temperature and humidity trend chart</canvas>
                 </div>
             </section>
 
-            <section class="table-section">
+            <section class="table-section card">
                 <div class="table-header">
                     <h2>Telemetry Logs (latest 50)</h2>
                 </div>
@@ -88,7 +95,7 @@
                 </div>
             </section>
 
-            <section class="table-section">
+            <section class="table-section card">
                 <div class="table-header">
                     <h2>Access Logs (latest 50)</h2>
                 </div>

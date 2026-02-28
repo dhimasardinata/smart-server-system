@@ -5,6 +5,7 @@ const REFRESH_INTERVAL = 60000;
 const el = {
     statusDot: document.getElementById('status-dot'),
     statusText: document.getElementById('status-text'),
+    refreshBtn: document.getElementById('refresh-btn'),
     tempValue: document.getElementById('temp-value'),
     humValue: document.getElementById('hum-value'),
     alarmState: document.getElementById('alarm-state'),
@@ -33,20 +34,20 @@ function initChart() {
                 {
                     label: 'Temperature (C)',
                     data: [],
-                    borderColor: '#22d3ee',
-                    backgroundColor: 'rgba(34,211,238,0.15)',
+                    borderColor: '#36b6ff',
+                    backgroundColor: 'rgba(54, 182, 255, 0.14)',
                     fill: true,
                     tension: 0.35,
-                    pointRadius: 1.5
+                    pointRadius: 1.8
                 },
                 {
                     label: 'Humidity (%)',
                     data: [],
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59,130,246,0.12)',
+                    borderColor: '#1de9c6',
+                    backgroundColor: 'rgba(29, 233, 198, 0.11)',
                     fill: true,
                     tension: 0.35,
-                    pointRadius: 1.5
+                    pointRadius: 1.8
                 }
             ]
         },
@@ -54,11 +55,17 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,.1)' } },
-                y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,.1)' } }
+                x: {
+                    ticks: { color: '#9fb1d4', maxRotation: 0, autoSkipPadding: 14 },
+                    grid: { color: 'rgba(159, 177, 212, 0.14)' }
+                },
+                y: {
+                    ticks: { color: '#9fb1d4' },
+                    grid: { color: 'rgba(159, 177, 212, 0.14)' }
+                }
             },
             plugins: {
-                legend: { labels: { color: '#cbd5e1' } }
+                legend: { labels: { color: '#dce8ff', boxWidth: 12 } }
             }
         }
     });
@@ -118,7 +125,7 @@ function parseTelemetry(gviz) {
             doorState: String(c[7]?.v || 'LOCKED'),
             wifiRssi: Number(c[8]?.v || 0)
         };
-    }).filter(x => x.timestamp && x.temperature > 0);
+    }).filter(x => x.timestamp);
 }
 
 function parseAccess(gviz) {
@@ -187,7 +194,11 @@ function renderAccessTable(items) {
 }
 
 function updateSummary(telemetry, access) {
-    if (telemetry.length === 0) return;
+    if (telemetry.length === 0) {
+        el.tempValue.textContent = '--';
+        el.humValue.textContent = '--';
+        return;
+    }
     const latest = telemetry[telemetry.length - 1];
     el.tempValue.textContent = latest.temperature.toFixed(1);
     el.humValue.textContent = latest.humidity.toFixed(1);
@@ -250,6 +261,10 @@ el.saveBtn.addEventListener('click', () => {
     const id = saveSheetId();
     if (id) refresh();
 });
+
+if (el.refreshBtn) {
+    el.refreshBtn.addEventListener('click', refresh);
+}
 
 initChart();
 loadSheetId();
