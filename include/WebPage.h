@@ -74,6 +74,7 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 <button class="tb" data-tab="thermal" onclick="sT('thermal')">Termal</button>
 <button class="tb" data-tab="security" onclick="sT('security')">Keamanan</button>
 <button class="tb" data-tab="users" onclick="sT('users')">Pengguna</button>
+<button class="tb" data-tab="firmware" onclick="sT('firmware')">Firmware</button>
 </div>
 <div class="tp active" id="tab-wifi"><div class="card">
 <h2>Jaringan WiFi <span class="tag">Pindai &amp; Hubungkan</span></h2>
@@ -115,25 +116,44 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 <div class="acts"><button class="btn bp" onclick="saveUser()">Tambah / Ubah</button><button class="btn bs" onclick="loadUsers()">Muat Ulang</button></div>
 <table><thead><tr><th>ID</th><th>Nama</th><th>Aktif</th><th>Aksi</th></tr></thead><tbody id="users-body"></tbody></table>
 </div></div>
+<div class="tp" id="tab-firmware"><div class="card">
+<h2>Update Firmware <span class="tag">Web OTA</span></h2>
+<div class="grid">
+<div style="grid-column:1/-1"><label>Firmware (.bin)</label><input id="fw-file" type="file" accept=".bin,application/octet-stream"></div>
+</div>
+<div class="acts"><button class="btn bp" onclick="uploadFirmware()">Upload Firmware</button></div>
+<div style="margin-top:14px">
+<div class="wi" id="fw-status"><span class="wn">Siap upload firmware</span><span class="wm">0%</span></div>
+<div style="margin-top:10px;height:12px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--bd);overflow:hidden">
+<div id="fw-progress" style="height:100%;width:0%;background:linear-gradient(135deg,var(--bl),var(--cy));transition:width .2s ease"></div>
+</div>
+<div id="fw-meta" style="margin-top:8px;font-size:.78rem;color:var(--td)">Pilih file hasil build firmware dengan ekstensi .bin.</div>
+</div>
+</div></div>
 </div>
 <div class="tbox" id="tbox"></div>
 <script>
 function sT(n){document.querySelectorAll('.tp').forEach(function(p){p.classList.remove('active')});document.querySelectorAll('.tb').forEach(function(b){b.classList.remove('active')});document.getElementById('tab-'+n).classList.add('active');document.querySelector('[data-tab="'+n+'"]').classList.add('active')}
 function toast(m,ok){var t=document.createElement('div');t.className='tst '+(ok?'ok':'er');t.textContent=m;document.getElementById('tbox').appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(40px)';setTimeout(function(){t.remove()},300)},3500)}
 var selectedSsid='';
+var otaPollTimer=0;
 async function fj(u,o){var r=await fetch(u,o||{});var t=await r.text();try{return JSON.parse(t)}catch(e){return{raw:t,ok:r.ok}}}
 function sigBars(rssi){var s=rssi>=-50?4:rssi>=-60?3:rssi>=-70?2:1;var h='';for(var i=1;i<=4;i++){var ht=[4,7,10,14][i-1];var c=i<=s?'var(--gn)':'rgba(255,255,255,.1)';h+='<span style="height:'+ht+'px;background:'+c+'"></span>'}return h}
-async function scanWifi(){toast('Memindai jaringan...',true);try{var d=await fj('/api/wifi/scan');var l=document.getElementById('wifi-list');l.innerHTML='';var nets=d.networks||[];if(!nets.length){l.innerHTML='<div class="wi"><span class="wn">Tidak ada jaringan terdeteksi</span></div>';return}nets.forEach(function(n){var div=document.createElement('div');div.className='wi';div.innerHTML='<span class="wn">'+n.ssid+(n.saved?' &check;':'')+'</span><span class="wm"><span class="sb">'+sigBars(n.rssi)+'</span>'+n.rssi+' dBm</span>';div.onclick=function(){selectedSsid=n.ssid;document.getElementById('wifi-ssid').value=n.ssid;document.querySelectorAll('.wi').forEach(function(x){x.classList.remove('active')});div.classList.add('active')};l.appendChild(div)});toast('Ditemukan '+nets.length+' jaringan',true)}catch(e){toast('Pindai gagal',false)}}
+function setFwProgress(percent,message,ok){var p=Math.max(0,Math.min(100,Math.round(percent||0)));var bar=document.getElementById('fw-progress');var status=document.getElementById('fw-status');var meta=document.getElementById('fw-meta');if(bar){bar.style.width=p+'%';bar.style.background=ok===false?'linear-gradient(135deg,var(--rd),#dc2626)':'linear-gradient(135deg,var(--bl),var(--cy))'}if(status){status.innerHTML='<span class="wn">'+message+'</span><span class="wm">'+p+'%</span>'}if(meta&&ok===false){meta.textContent='Periksa file .bin, koneksi ESP, dan serial monitor untuk detail error.'}}
+function renderWifiList(nets,pending){var l=document.getElementById('wifi-list');l.innerHTML='';if(!nets.length&&pending){l.innerHTML='<div class="wi"><span class="wn">Memindai jaringan...</span></div>';return}if(!nets.length){l.innerHTML='<div class="wi"><span class="wn">Tidak ada jaringan terdeteksi</span></div>';return}nets.forEach(function(n){var div=document.createElement('div');div.className='wi';div.innerHTML='<span class="wn">'+n.ssid+(n.saved?' &check;':'')+'</span><span class="wm"><span class="sb">'+sigBars(n.rssi)+'</span>'+n.rssi+' dBm</span>';div.onclick=function(){selectedSsid=n.ssid;document.getElementById('wifi-ssid').value=n.ssid;document.querySelectorAll('.wi').forEach(function(x){x.classList.remove('active')});div.classList.add('active')};l.appendChild(div)});if(pending){var hint=document.createElement('div');hint.className='wi';hint.innerHTML='<span class="wn">Memperbarui daftar...</span>';l.appendChild(hint)}}
+async function scanWifi(){toast('Memindai jaringan...',true);var st=Date.now();while(Date.now()-st<15000){try{var d=await fj('/api/wifi/scan');var nets=d.networks||[];renderWifiList(nets,!!d.pending);if(!d.pending){toast('Ditemukan '+nets.length+' jaringan',true);return}}catch(e){toast('Pindai gagal',false);return}await new Promise(function(r){setTimeout(r,800)})}toast('Pindai timeout',false)}
 async function connectWifi(){var si=document.getElementById('wifi-ssid').value.trim();var ssid=si||selectedSsid;if(!ssid){toast('Pilih atau isi SSID',false);return}var pass=document.getElementById('wifi-pass').value;toast('Menghubungkan ke '+ssid+'...',true);var d=await fj('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,password:pass})});if(!d.success){toast(d.error||'Gagal terhubung',false);return}await waitForWifi(ssid)}
 async function waitForWifi(ts){var st=Date.now();while(Date.now()-st<20000){await new Promise(function(r){setTimeout(r,1000)});try{var s=await fj('/api/state');if(s.wifiConnected){toast('Terhubung ke '+(s.ssid||ts)+(s.ip?' | IP '+s.ip:''),true);return}if(s.wifiState==='ap'){toast('Gagal. Periksa SSID/kata sandi.',false);return}}catch(e){}}toast('Timeout. Periksa serial monitor.',false)}
 async function loadThermal(){var c=await fj('/api/config/thermal');document.getElementById('warn-th').value=c.warnThreshold??27;document.getElementById('stage2-th').value=c.stage2Threshold??28;document.getElementById('fan1-baseline').value=String(c.fan1BaselineOn??true);document.getElementById('sensor-int').value=c.sensorReadIntervalSec??5;document.getElementById('cloud-int').value=c.cloudSendIntervalSec??60}
 async function saveThermal(){var r=await fetch('/api/config/thermal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warnThreshold:parseFloat(document.getElementById('warn-th').value),stage2Threshold:parseFloat(document.getElementById('stage2-th').value),fan1BaselineOn:document.getElementById('fan1-baseline').value==='true',sensorReadIntervalSec:parseInt(document.getElementById('sensor-int').value),cloudSendIntervalSec:parseInt(document.getElementById('cloud-int').value)})});toast(r.ok?'Konfigurasi termal tersimpan':'Gagal menyimpan',r.ok)}
-async function loadSecurity(){var c=await fj('/api/config/security');document.getElementById('max-fail').value=c.maxFail??3;document.getElementById('lockout-sec').value=c.lockoutSecs??120;document.getElementById('unlock-sec').value=c.unlockSecs??10;document.getElementById('device-id').value=c.deviceId??''}
+async function loadSecurity(){var c=await fj('/api/config/security');document.getElementById('max-fail').value=c.maxFail??3;document.getElementById('lockout-sec').value=c.lockoutSecs??120;document.getElementById('unlock-sec').value=c.unlockSecs??5;document.getElementById('device-id').value=c.deviceId??''}
 async function saveSecurity(){var r=await fetch('/api/config/security',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({maxFail:parseInt(document.getElementById('max-fail').value),lockoutSecs:parseInt(document.getElementById('lockout-sec').value),unlockSecs:parseInt(document.getElementById('unlock-sec').value),deviceId:document.getElementById('device-id').value})});toast(r.ok?'Konfigurasi keamanan tersimpan':'Gagal menyimpan',r.ok)}
 async function loadUsers(){var d=await fj('/api/users');var b=document.getElementById('users-body');b.innerHTML='';(d.users||[]).forEach(function(u){var tr=document.createElement('tr');tr.innerHTML='<td>'+u.userId+'</td><td>'+(u.displayName||'-')+'</td><td><span style="color:'+(u.enabled?'var(--gn)':'var(--rd)')+';">&bull;</span> '+(u.enabled?'Ya':'Tidak')+'</td><td><button class="btn bd" onclick="deleteUser(\''+u.userId+'\')">Hapus</button></td>';b.appendChild(tr)})}
 async function saveUser(){var p={userId:document.getElementById('u-id').value.trim(),displayName:document.getElementById('u-name').value.trim(),pin:document.getElementById('u-pin').value.trim(),enabled:true};var r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(r.ok){toast('Pengguna tersimpan',true);document.getElementById('u-pin').value='';loadUsers()}else{var e=await r.text();toast('Gagal: '+e,false)}}
 async function deleteUser(id){if(!confirm('Hapus pengguna '+id+'?'))return;var r=await fetch('/api/users/'+encodeURIComponent(id),{method:'DELETE'});if(r.ok){toast('Pengguna dihapus',true);loadUsers()}else{var e=await r.text();toast('Gagal: '+e,false)}}
-scanWifi();loadThermal();loadSecurity();loadUsers();
+async function pollOtaState(){if(otaPollTimer){clearTimeout(otaPollTimer);otaPollTimer=0}try{var s=await fj('/api/state');if(typeof s.otaProgress==='number'){setFwProgress(s.otaProgress,s.otaMessage||'Memproses firmware...',true)}if(s.restartPending){document.getElementById('fw-meta').textContent='ESP sedang restart. Tunggu 5-10 detik lalu muat ulang halaman.'}if(s.otaBusy||s.restartPending){otaPollTimer=setTimeout(pollOtaState,800)}}catch(e){document.getElementById('fw-meta').textContent='Koneksi ke ESP terputus. Jika upload sukses, perangkat sedang restart.'}}
+function uploadFirmware(){var input=document.getElementById('fw-file');var file=input.files&&input.files[0];if(!file){toast('Pilih file firmware .bin dulu',false);return}if(!/\.bin$/i.test(file.name)){toast('File harus berekstensi .bin',false);return}var xhr=new XMLHttpRequest();var form=new FormData();form.append('firmware',file,file.name);setFwProgress(0,'Menyiapkan upload firmware...',true);document.getElementById('fw-meta').textContent='Jangan tutup halaman selama upload berjalan.';xhr.open('POST','/api/ota/upload',true);xhr.setRequestHeader('X-Firmware-Size',String(file.size));xhr.upload.onprogress=function(evt){if(evt.lengthComputable){var p=Math.min(95,Math.round((evt.loaded/evt.total)*100));setFwProgress(p,'Mengunggah '+file.name+'...',true)}};xhr.onload=function(){var res={};try{res=JSON.parse(xhr.responseText||'{}')}catch(e){}if(xhr.status>=200&&xhr.status<300&&res.success){setFwProgress(100,res.message||'Firmware diterima. ESP akan restart.',true);document.getElementById('fw-meta').textContent='Firmware berhasil diterima. Menunggu restart perangkat...';toast('Firmware berhasil diunggah',true);pollOtaState();return}setFwProgress(0,res.error||'Upload firmware gagal',false);toast(res.error||'Upload firmware gagal',false)};xhr.onerror=function(){setFwProgress(0,'Upload firmware gagal',false);toast('Upload firmware gagal',false)};xhr.send(form)}
+scanWifi();loadThermal();loadSecurity();loadUsers();setFwProgress(0,'Siap upload firmware',true);
 </script>
 </body>
 </html>
@@ -266,10 +286,10 @@ h1{font-size:1.35rem;font-weight:800;letter-spacing:-.02em;color:#fff}
 <div class="ft" id="ft"></div>
 </div>
 <script>
-var tc=document.getElementById('c-temp');
+var tc=document.getElementById('c-temp'),refreshBusy=false;
 function setDot(on){var d=document.getElementById('dot');d.classList.toggle('on',on);d.classList.toggle('off',!on);document.getElementById('ct').textContent=on?'Terhubung':'Terputus'}
 function setBg(el,cls,txt){el.className='bg '+cls;el.textContent=txt}
-async function refresh(){try{var r=await fetch('/api/state');var d=await r.json();document.getElementById('temp').textContent=d.valid?d.temperature.toFixed(1):'--';document.getElementById('hum').textContent=d.valid?d.humidity.toFixed(1):'--';document.getElementById('rssi').textContent=d.wifiConnected?d.rssi:'--';
+async function refresh(){if(refreshBusy)return;refreshBusy=true;try{var r=await fetch('/api/state');var d=await r.json();document.getElementById('temp').textContent=d.valid?d.temperature.toFixed(1):'--';document.getElementById('hum').textContent=d.valid?d.humidity.toFixed(1):'--';document.getElementById('rssi').textContent=d.wifiConnected?d.rssi:'--';
 setBg(document.getElementById('fan1'),d.fan1On?'bg-on':'bg-off',d.fan1On?'ON':'OFF');
 setBg(document.getElementById('fan2'),d.fan2On?'bg-on':'bg-off',d.fan2On?'ON':'OFF');
 setBg(document.getElementById('alarm'),d.alarm?'bg-al':'bg-on',d.alarm?'ALARM':'NORMAL');
@@ -285,7 +305,7 @@ var al=document.getElementById('alrt');if(d.alarm){al.style.display='flex';al.cl
 var info=d.wifiConnected?'http://'+d.ip+'/':'Hubungkan ESP ke WiFi untuk akses lokal.';if(d.wifiConnected&&d.mdns)info+='\n'+' http://'+d.mdns+'/';document.getElementById('local').textContent=info;
 setDot(d.wifiConnected);
 var ls='';if(d.lastSend>1000){var dt=new Date(d.lastSend*1000);ls=' \u00B7 Terkirim: '+dt.toLocaleTimeString('id-ID')}document.getElementById('ft').textContent='Device: '+(d.deviceId||'-')+' \u00B7 '+d.wifiState+ls;
-}catch(e){setDot(false);document.getElementById('ft').textContent='Kesalahan koneksi'}}
+}catch(e){setDot(false);document.getElementById('ft').textContent='Kesalahan koneksi'}finally{refreshBusy=false}}
 async function sendNow(){await fetch('/api/send',{method:'POST'});refresh()}
 async function formatFlash(){if(!confirm('Format flash akan menghapus config WiFi, PIN, dan data tersimpan. Lanjutkan?'))return;var r=await fetch('/api/flash/format',{method:'POST'});var d=await r.json().catch(function(){return{}});if(!r.ok){alert(d.error||'Gagal format flash');return}alert('Flash diformat. ESP akan restart.')}
 refresh();setInterval(refresh,3000);

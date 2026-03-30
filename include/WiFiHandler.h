@@ -3,6 +3,7 @@
 #include "Config.h"
 
 #include <Arduino.h>
+
 #include <DNSServer.h>
 #include <WiFi.h>
 #include <vector>
@@ -29,9 +30,12 @@ class WiFiManager {
   [[nodiscard]] String getSSID() const { return WiFi.SSID(); }
   [[nodiscard]] int32_t getRSSI() const { return WiFi.RSSI(); }
   [[nodiscard]] IPAddress getIP() const;
+  [[nodiscard]] bool isScanPending() const;
+  [[nodiscard]] unsigned long lastScanAgeMs() const;
 
   void startApMode();
   bool connectTo(const String& ssid, const String& password);
+  void requestScanRefresh(bool force = false);
   [[nodiscard]] const char* stateName() const;
 
   struct ScannedNetwork {
@@ -51,6 +55,8 @@ class WiFiManager {
   size_t _currentNetIndex = 0;
   bool _scanComplete = false;
   bool _keepApAlive = false;
+  bool _userScanPending = false;
+  unsigned long _lastScanResultsMs = 0;
 
   struct MatchedNetwork {
     String ssid;
@@ -69,12 +75,15 @@ class WiFiManager {
   static constexpr unsigned long CONNECT_TIMEOUT = 15000;
   static constexpr unsigned long VERIFY_TIMEOUT = 10000;
   static constexpr unsigned long RETRY_DELAY = 5000;
+  static constexpr unsigned long SCAN_CACHE_MS = 15000;
 
   static constexpr const char* CONNECTIVITY_CHECK_URL =
       "http://connectivitycheck.gstatic.com/generate_204";
 
   void startScan();
   void processScanResults();
+  void processUserScanResults();
+  void captureScanResults(bool captureMatches);
   void tryNextNetwork();
   bool verifyInternet();
   void onConnected();

@@ -1,23 +1,90 @@
 #include "Display.h"
 #include "Config.h"
+#include "I2CBus.h"
 
 #include <time.h>
 
 Display::Display(uint8_t addr, uint8_t cols, uint8_t rows)
     : _lcd(addr, cols, rows), _addr(addr), _cols(cols), _rows(rows) {}
 
-bool Display::begin() {
-  Wire.beginTransmission(_addr);
-  if (Wire.endTransmission() != 0) {
-    Serial.println(F("LCD not found"));
+bool Display::initialize(bool recoveredLog) {
+  if (!I2CBus::probe(_addr)) {
+    _ready = false;
     return false;
   }
-
   _lcd.init();
   _lcd.backlight();
   _ready = true;
-  Serial.println(F("LCD initialized"));
+  _lastPresenceCheckMs = millis();
+  _lastScrollTime = 0;
+  if (recoveredLog) {
+    Serial.println(F("LCD reinitialized"));
+    _recoveredSinceLastCheck = true;
+  } else {
+    Serial.println(F("LCD initialized"));
+  }
   return true;
+}
+
+bool Display::begin() {
+  if (!initialize(false)) {
+    Serial.println(F("LCD not found"));
+    return false;
+  }
+  return true;
+}
+
+void Display::scheduleRecovery(unsigned long delayMs) {
+  _scheduledRecoveryAtMs = millis() + delayMs;
+  _recoveryScheduled = true;
+}
+
+bool Display::maintainConnection() {
+  const unsigned long now = millis();
+
+  if (_recoveryScheduled &&
+      static_cast<long>(now - _scheduledRecoveryAtMs) >= 0) {
+    _recoveryScheduled = false;
+    if (!I2CBus::recover("LCD scheduled")) {
+      Serial.println(F("I2C: LCD bus still held during scheduled recovery"));
+    }
+    if (!initialize(true)) {
+      Serial.println(F("LCD scheduled recovery failed"));
+      return false;
+    }
+    return true;
+  }
+
+  if (_ready) {
+    if (now - _lastPresenceCheckMs < PRESENCE_CHECK_MS) {
+      return true;
+    }
+    _lastPresenceCheckMs = now;
+    if (I2CBus::probe(_addr)) {
+      return true;
+    }
+    _ready = false;
+    Serial.println(F("LCD disconnected, waiting for recovery"));
+  }
+
+  if (now - _lastReconnectAttemptMs < RECONNECT_INTERVAL_MS) {
+    return false;
+  }
+  _lastReconnectAttemptMs = now;
+
+  if (!I2CBus::probe(_addr)) {
+    if (!I2CBus::recover("LCD")) {
+      Serial.println(F("I2C: LCD bus still held after recovery"));
+    }
+  }
+
+  return initialize(true);
+}
+
+bool Display::consumeRecovered() {
+  const bool recovered = _recoveredSinceLastCheck;
+  _recoveredSinceLastCheck = false;
+  return recovered;
 }
 
 void Display::clear() {
@@ -299,7 +366,7 @@ void Display::showMessage(const char* title, const char* msg, bool success) {
 }
 
 void Display::loop() {
-  if (!_ready) return;
+  if (!maintainConnection()) return;
   if (millis() - _lastScrollTime < SCROLL_INTERVAL) return;
   _lastScrollTime = millis();
   showMainScreen();

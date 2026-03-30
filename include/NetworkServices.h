@@ -7,10 +7,13 @@
 #include "WiFiHandler.h"
 
 #include <Arduino.h>
+
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
-
 #include <deque>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 class NetworkServices {
  public:
@@ -39,6 +42,7 @@ class NetworkServices {
   bool _cachedAlertOn = false;
   const char* _cachedAlertState = "IDLE";
   bool _pendingRestart = false;
+  const char* _restartReason = "pending operation";
   unsigned long _restartAtMs = 0;
 
   unsigned long _lastTelemetryEnqueueMs = 0;
@@ -48,15 +52,26 @@ class NetworkServices {
   std::deque<AccessLogPayload> _accessQueue;
   unsigned long _nextAttemptMs = 0;
   uint8_t _retryCount = 0;
+  bool _forceFlushRequested = false;
+  SemaphoreHandle_t _queueMutex = nullptr;
+  TaskHandle_t _uploadTask = nullptr;
+  bool _asyncUploadEnabled = false;
 
   void setupRoutes();
   void setupWiFiRoutes();
   void sendCaptiveRedirect(AsyncWebServerRequest* request);
+  void notifyUploader();
+  bool tryTakeQueueLock(TickType_t waitTicks = portMAX_DELAY);
+  size_t telemetryQueueSize();
+  size_t accessQueueSize();
+  static void uploadTaskEntry(void* context);
+  void uploadTaskLoop();
 
   void handleRoot(AsyncWebServerRequest* request);
   void handleGetState(AsyncWebServerRequest* request);
   void handleGetThermalConfig(AsyncWebServerRequest* request);
-  void handleSetThermalConfig(AsyncWebServerRequest* request, JsonVariant& json);
+  void handleSetThermalConfig(AsyncWebServerRequest* request,
+                              JsonVariant& json);
   void handleGetSecurityConfig(AsyncWebServerRequest* request);
   void handleSetSecurityConfig(AsyncWebServerRequest* request,
                                JsonVariant& json);
@@ -67,6 +82,10 @@ class NetworkServices {
   void handleWiFiScan(AsyncWebServerRequest* request);
   void handleWiFiConnect(AsyncWebServerRequest* request, JsonVariant& json);
   void handleFormatFlash(AsyncWebServerRequest* request);
+  void handleOtaUploadResponse(AsyncWebServerRequest* request);
+  void handleOtaUploadChunk(AsyncWebServerRequest* request,
+                            const String& filename, size_t index,
+                            uint8_t* data, size_t len, bool final);
 
   void enqueueTelemetry();
   String doorState() const;
@@ -75,7 +94,7 @@ class NetworkServices {
   void enqueueTelemetryPayload(const TelemetryLogPayload& payload);
   void enqueueAccessPayload(const AccessLogPayload& payload);
   void flushQueueTick();
-  bool flushNow(uint16_t maxItems);
   bool sendOne();
   void backoff();
+  void scheduleRestart(const char* reason, unsigned long delayMs = 750);
 };

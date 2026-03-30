@@ -17,11 +17,15 @@ class SHT21Sensor {
 
   [[nodiscard]] bool begin();
   [[nodiscard]] SensorData read();
- [[nodiscard]] bool isReady() const { return _ready; }
+  [[nodiscard]] bool isReady() const { return _ready; }
 
  private:
   SHTSensor _sht;
   bool _ready = false;
+  unsigned long _lastReconnectAttemptMs = 0;
+
+  [[nodiscard]] bool ensureReady();
+  [[nodiscard]] bool initialize(bool detailedLog, bool recoveredLog);
 };
 
 class SensorManager {

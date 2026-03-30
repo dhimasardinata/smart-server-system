@@ -32,7 +32,7 @@ struct AppConfig {
   bool fan1BaselineOn = true;
   uint8_t maxFailedAttempts = 3;
   uint32_t keypadLockoutSec = 120;
-  uint32_t solenoidUnlockSec = 10;
+  uint32_t solenoidUnlockSec = 5;
   String googleScriptUrl;
   String deviceId;
 

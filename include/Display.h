@@ -12,6 +12,8 @@ class Display {
   Display(uint8_t addr, uint8_t cols, uint8_t rows);
 
   bool begin();
+  bool maintainConnection();
+  void scheduleRecovery(unsigned long delayMs = 30);
   void clear();
   void loop();
 
@@ -38,6 +40,7 @@ class Display {
                     bool fan2On, bool warning);
   void setSecurity(const String& doorState, const String& accessMessage,
                    bool lockoutActive, uint32_t lockoutRemainSec);
+  bool consumeRecovered();
 
   [[nodiscard]] bool isReady() const { return _ready; }
 
@@ -60,11 +63,19 @@ class Display {
   String _accessMessage = "READY";
   bool _lockoutActive = false;
   uint32_t _lockoutRemainSec = 0;
+  unsigned long _lastPresenceCheckMs = 0;
+  unsigned long _lastReconnectAttemptMs = 0;
+  unsigned long _scheduledRecoveryAtMs = 0;
+  bool _recoveredSinceLastCheck = false;
+  bool _recoveryScheduled = false;
 
   unsigned long _lastScrollTime = 0;
   int _scrollOffset = 0;
   static constexpr unsigned long SCROLL_INTERVAL = 350;
+  static constexpr unsigned long PRESENCE_CHECK_MS = 2000;
+  static constexpr unsigned long RECONNECT_INTERVAL_MS = 1000;
 
   void renderHeaderScroll();
   void clearRow(uint8_t row);
+  bool initialize(bool recoveredLog);
 };

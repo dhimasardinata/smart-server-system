@@ -115,7 +115,7 @@ AppConfig::AppConfig() {
   fan1BaselineOn = true;
   maxFailedAttempts = 3;
   keypadLockoutSec = 120;
-  solenoidUnlockSec = 10;
+  solenoidUnlockSec = 5;
   googleScriptUrl = DEFAULT_GSCRIPT_URL;
   deviceId = DEFAULT_DEVICE_ID;
 }

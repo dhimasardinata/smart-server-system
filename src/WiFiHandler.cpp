@@ -39,6 +39,10 @@ void WiFiManager::begin(ConfigManager* config) {
 void WiFiManager::update() {
   unsigned long now = millis();
 
+  if (_userScanPending && _state != State::Scanning) {
+    processUserScanResults();
+  }
+
   switch (_state) {
     case State::ApMode:
       _dnsServer.processNextRequest();
@@ -53,7 +57,8 @@ void WiFiManager::update() {
       break;
 
     case State::Connecting:
-      if (_keepApAlive) _dnsServer.processNextRequest();
+      if (_keepApAlive)
+        _dnsServer.processNextRequest();
       if (WiFi.status() == WL_CONNECTED) {
         onConnected();
       } else if (now - _lastAction > CONNECT_TIMEOUT) {
@@ -63,7 +68,8 @@ void WiFiManager::update() {
       break;
 
     case State::Verifying: {
-      if (_keepApAlive) _dnsServer.processNextRequest();
+      if (_keepApAlive)
+        _dnsServer.processNextRequest();
       onConnected();
       break;
     }
@@ -94,29 +100,10 @@ void WiFiManager::startScan() {
 
 void WiFiManager::processScanResults() {
   int n = WiFi.scanComplete();
-  if (n < 0) return;
+  if (n < 0)
+    return;
 
-  _allScannedNetworks.clear();
-  _matchedNetworks.clear();
-
-  for (int i = 0; i < n; ++i) {
-    ScannedNetwork sn;
-    sn.ssid = WiFi.SSID(i);
-    sn.rssi = WiFi.RSSI(i);
-    sn.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
-    sn.saved = false;
-
-    for (const auto& saved : _config->data.wifiNetworks) {
-      if (saved.enabled && saved.ssid == sn.ssid) {
-        sn.saved = true;
-        _matchedNetworks.push_back({saved.ssid, saved.password, sn.rssi});
-        break;
-      }
-    }
-    _allScannedNetworks.push_back(sn);
-  }
-
-  WiFi.scanDelete();
+  captureScanResults(true);
 
   std::sort(_matchedNetworks.begin(), _matchedNetworks.end(),
             [](const auto& a, const auto& b) { return a.rssi > b.rssi; });
@@ -130,6 +117,61 @@ void WiFiManager::processScanResults() {
     _currentNetIndex = 0;
     tryNextNetwork();
   }
+}
+
+void WiFiManager::processUserScanResults() {
+  const int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING)
+    return;
+
+  if (n < 0) {
+    Serial.println(F("WiFi: Manual scan failed"));
+    WiFi.scanDelete();
+    _userScanPending = false;
+  } else {
+    captureScanResults(false);
+    Serial.printf("WiFi: Manual scan cached %d networks\n",
+                  static_cast<int>(_allScannedNetworks.size()));
+  }
+
+  if (_state == State::ApMode && !_keepApAlive) {
+    WiFi.mode(WIFI_AP);
+  }
+}
+
+void WiFiManager::captureScanResults(bool captureMatches) {
+  const int n = WiFi.scanComplete();
+  if (n < 0)
+    return;
+
+  _allScannedNetworks.clear();
+  _matchedNetworks.clear();
+  if (n > 0)
+    _allScannedNetworks.reserve(static_cast<size_t>(n));
+
+  for (int i = 0; i < n; ++i) {
+    ScannedNetwork sn;
+    sn.ssid = WiFi.SSID(i);
+    sn.rssi = WiFi.RSSI(i);
+    sn.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+    sn.saved = false;
+
+    for (const auto& saved : _config->data.wifiNetworks) {
+      if (saved.enabled && saved.ssid == sn.ssid) {
+        sn.saved = true;
+        if (captureMatches) {
+          _matchedNetworks.push_back({saved.ssid, saved.password, sn.rssi});
+        }
+        break;
+      }
+    }
+    _allScannedNetworks.push_back(sn);
+  }
+
+  WiFi.scanDelete();
+  _lastScanResultsMs = millis();
+  _scanComplete = true;
+  _userScanPending = false;
 }
 
 void WiFiManager::tryNextNetwork() {
@@ -221,8 +263,19 @@ IPAddress WiFiManager::getIP() const {
   return (_state == State::ApMode) ? WiFi.softAPIP() : WiFi.localIP();
 }
 
+bool WiFiManager::isScanPending() const {
+  return _state == State::Scanning || _userScanPending;
+}
+
+unsigned long WiFiManager::lastScanAgeMs() const {
+  if (_lastScanResultsMs == 0)
+    return 0;
+  return millis() - _lastScanResultsMs;
+}
+
 bool WiFiManager::connectTo(const String& ssid, const String& password) {
-  if (ssid.length() == 0) return false;
+  if (ssid.length() == 0)
+    return false;
 
   _matchedNetworks.clear();
   _matchedNetworks.push_back({ssid, password, 0});
@@ -235,43 +288,27 @@ bool WiFiManager::connectTo(const String& ssid, const String& password) {
   return true;
 }
 
-const char* WiFiManager::stateName() const { return wifiStateName(_state); }
+const char* WiFiManager::stateName() const {
+  return wifiStateName(_state);
+}
+
+void WiFiManager::requestScanRefresh(bool force) {
+  if (_userScanPending || _state == State::Scanning)
+    return;
+
+  const bool cacheFresh = _scanComplete && lastScanAgeMs() < SCAN_CACHE_MS;
+  if (!force && cacheFresh)
+    return;
+
+  const bool keepAp = (_state == State::ApMode) || _keepApAlive;
+  WiFi.mode(keepAp ? WIFI_AP_STA : WIFI_STA);
+  WiFi.scanDelete();
+  WiFi.scanNetworks(true, true);
+  _userScanPending = true;
+}
 
 std::vector<WiFiManager::ScannedNetwork> WiFiManager::scanNow() {
-  const bool keepAp = (_state == State::ApMode) || _keepApAlive;
-  if (keepAp) {
-    WiFi.mode(WIFI_AP_STA);
-    delay(50);
-  }
-
-  std::vector<ScannedNetwork> results;
-  const int n = WiFi.scanNetworks(false, true);
-  if (n > 0) {
-    results.reserve(static_cast<size_t>(n));
-    for (int i = 0; i < n; ++i) {
-      ScannedNetwork sn;
-      sn.ssid = WiFi.SSID(i);
-      sn.rssi = WiFi.RSSI(i);
-      sn.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
-      sn.saved = false;
-
-      for (const auto& saved : _config->data.wifiNetworks) {
-        if (saved.enabled && saved.ssid == sn.ssid) {
-          sn.saved = true;
-          break;
-        }
-      }
-      results.push_back(sn);
-    }
-  }
-
-  WiFi.scanDelete();
-  _allScannedNetworks = results;
-
-  if (keepAp) {
-    WiFi.mode(WIFI_AP_STA);
-  }
-
+  requestScanRefresh(true);
   return _allScannedNetworks;
 }
 

@@ -1,16 +1,71 @@
 #include "NetworkServices.h"
 
+#include "OtaCoordinator.h"
 #include "WebPage.h"
 
 #include <Esp.h>
+#include <Update.h>
 #include <time.h>
 
 namespace {
 constexpr uint16_t MAX_QUEUE_SIZE = 300;
 constexpr const char* LOCAL_MDNS_HOST = "monitor-server.local";
+constexpr unsigned long MIN_SEND_GAP_MS = 250;
+constexpr unsigned long DISCONNECTED_WAIT_MS = 1000;
+constexpr unsigned long IDLE_WAIT_MS = 2000;
+constexpr uint32_t UPLOAD_TASK_STACK_WORDS = 8192;
+constexpr UBaseType_t UPLOAD_TASK_PRIORITY = 1;
 
-bool isApiPath(const String& url) { return url.startsWith("/api/"); }
+struct FirmwareUploadContext {
+  bool accepted = false;
+  bool success = false;
+  bool failed = false;
+  int statusCode = 500;
+  size_t totalBytes = 0;
+  String filename;
+  String error;
+};
+
+bool isApiPath(const String& url) {
+  return url.startsWith("/api/");
 }
+
+void sendJson(AsyncWebServerRequest* request, JsonDocument& doc) {
+  AsyncResponseStream* response =
+      request->beginResponseStream("application/json");
+  serializeJson(doc, *response);
+  request->send(response);
+}
+
+size_t requestFirmwareSize(AsyncWebServerRequest* request) {
+  if (request == nullptr || !request->hasHeader("X-Firmware-Size")) {
+    return UPDATE_SIZE_UNKNOWN;
+  }
+
+  const AsyncWebHeader* header = request->getHeader("X-Firmware-Size");
+  if (header == nullptr) {
+    return UPDATE_SIZE_UNKNOWN;
+  }
+
+  const unsigned long parsed = strtoul(header->value().c_str(), nullptr, 10);
+  return parsed > 0 ? parsed : UPDATE_SIZE_UNKNOWN;
+}
+
+FirmwareUploadContext* uploadContext(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return nullptr;
+  }
+  return static_cast<FirmwareUploadContext*>(request->_tempObject);
+}
+
+void clearUploadContext(AsyncWebServerRequest* request) {
+  FirmwareUploadContext* context = uploadContext(request);
+  delete context;
+  if (request != nullptr) {
+    request->_tempObject = nullptr;
+  }
+}
+}  // namespace
 
 NetworkServices::NetworkServices() : _server(80) {}
 
@@ -20,9 +75,23 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
   _wifi = wifi;
   _sensors = sensors;
   _access = access;
+  OtaCoordinator::instance().begin();
 
   _googleSheets.begin(_config->data.googleScriptUrl);
   configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+
+  _queueMutex = xSemaphoreCreateMutex();
+  if (_queueMutex == nullptr) {
+    Serial.println(
+        F("NetworkServices: queue mutex init failed, using sync upload"));
+  } else if (xTaskCreate(NetworkServices::uploadTaskEntry, "cloud_upload",
+                         UPLOAD_TASK_STACK_WORDS, this, UPLOAD_TASK_PRIORITY,
+                         &_uploadTask) != pdPASS) {
+    Serial.println(
+        F("NetworkServices: upload task init failed, using sync upload"));
+  } else {
+    _asyncUploadEnabled = true;
+  }
 
   setupRoutes();
   setupWiFiRoutes();
@@ -33,7 +102,7 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
                              bool warning, bool solenoidOn, bool alertOn,
                              const char* alertState) {
   if (_pendingRestart && millis() >= _restartAtMs) {
-    Serial.println(F("Restarting after flash format"));
+    Serial.printf("Restarting after %s\n", _restartReason);
     delay(100);
     ESP.restart();
     return;
@@ -47,14 +116,20 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
   _cachedAlertOn = alertOn;
   _cachedAlertState = alertState != nullptr ? alertState : "IDLE";
 
+  const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
+  if (otaState.busy) {
+    return;
+  }
+
   if (_wifi->isConnected()) {
     if (millis() - _lastTelemetryEnqueueMs >=
         (_config->data.cloudSendIntervalSec * 1000UL)) {
       _lastTelemetryEnqueueMs = millis();
       enqueueTelemetry();
-      _lastSendEpoch = static_cast<unsigned long>(time(nullptr));
     }
-    flushQueueTick();
+    if (!_asyncUploadEnabled) {
+      flushQueueTick();
+    }
   }
 }
 
@@ -73,61 +148,213 @@ void NetworkServices::logAccessEvent(const AccessEvent& event) {
   enqueueAccessPayload(payload);
 }
 
-void NetworkServices::enqueueTelemetryPayload(const TelemetryLogPayload& payload) {
-  _telemetryQueue.push_back(payload);
-  if (_telemetryQueue.size() > MAX_QUEUE_SIZE) _telemetryQueue.pop_front();
+void NetworkServices::enqueueTelemetryPayload(
+    const TelemetryLogPayload& payload) {
+  if (tryTakeQueueLock()) {
+    _telemetryQueue.push_back(payload);
+    if (_telemetryQueue.size() > MAX_QUEUE_SIZE)
+      _telemetryQueue.pop_front();
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+  notifyUploader();
+}
+
+void NetworkServices::notifyUploader() {
+  if (_asyncUploadEnabled && _uploadTask != nullptr) {
+    xTaskNotifyGive(_uploadTask);
+  }
+}
+
+bool NetworkServices::tryTakeQueueLock(TickType_t waitTicks) {
+  if (_queueMutex == nullptr) {
+    return true;
+  }
+  return xSemaphoreTake(_queueMutex, waitTicks) == pdTRUE;
+}
+
+size_t NetworkServices::telemetryQueueSize() {
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return _telemetryQueue.size();
+  }
+  const size_t size = _telemetryQueue.size();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  return size;
+}
+
+size_t NetworkServices::accessQueueSize() {
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return _accessQueue.size();
+  }
+  const size_t size = _accessQueue.size();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  return size;
+}
+
+void NetworkServices::uploadTaskEntry(void* context) {
+  static_cast<NetworkServices*>(context)->uploadTaskLoop();
+}
+
+void NetworkServices::uploadTaskLoop() {
+  for (;;) {
+    bool hasPending = false;
+    bool shouldSend = false;
+    bool forceFlush = false;
+    unsigned long nextAttemptMs = 0;
+    const bool connected = (_wifi != nullptr) && _wifi->isConnected();
+
+    if (tryTakeQueueLock(pdMS_TO_TICKS(50))) {
+      hasPending = !_accessQueue.empty() || !_telemetryQueue.empty();
+      forceFlush = _forceFlushRequested;
+      nextAttemptMs = _nextAttemptMs;
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+
+    const unsigned long now = millis();
+    unsigned long waitMs = IDLE_WAIT_MS;
+    const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
+
+    if (otaState.busy) {
+      waitMs = IDLE_WAIT_MS;
+    } else if (!connected) {
+      waitMs = hasPending ? DISCONNECTED_WAIT_MS : IDLE_WAIT_MS;
+    } else if (!hasPending) {
+      waitMs = IDLE_WAIT_MS;
+    } else if (forceFlush || now >= nextAttemptMs) {
+      shouldSend = true;
+    } else {
+      waitMs = min(nextAttemptMs - now, DISCONNECTED_WAIT_MS);
+    }
+
+    if (shouldSend) {
+      sendOne();
+      continue;
+    }
+
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(max(1UL, waitMs)));
+  }
 }
 
 void NetworkServices::enqueueAccessPayload(const AccessLogPayload& payload) {
-  _accessQueue.push_back(payload);
-  if (_accessQueue.size() > MAX_QUEUE_SIZE) _accessQueue.pop_front();
+  if (tryTakeQueueLock()) {
+    _accessQueue.push_back(payload);
+    if (_accessQueue.size() > MAX_QUEUE_SIZE)
+      _accessQueue.pop_front();
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+  notifyUploader();
 }
 
 void NetworkServices::backoff() {
   _retryCount = min<uint8_t>(_retryCount + 1, 6);
   const unsigned long delayMs = 1000UL << _retryCount;
   _nextAttemptMs = millis() + min(delayMs, 60000UL);
+  _forceFlushRequested = false;
 }
 
 bool NetworkServices::sendOne() {
-  if (!_googleSheets.isConfigured()) return false;
+  if (!_googleSheets.isConfigured()) {
+    if (tryTakeQueueLock()) {
+      _nextAttemptMs = millis() + 10000UL;
+      _forceFlushRequested = false;
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+    return false;
+  }
 
-  bool ok = false;
+  bool sendAccessPayload = false;
+  AccessLogPayload accessPayload;
+  TelemetryLogPayload telemetryPayload;
+
+  if (!tryTakeQueueLock()) {
+    return false;
+  }
+
   if (!_accessQueue.empty()) {
-    ok = _googleSheets.sendAccess(_accessQueue.front());
-    if (ok) _accessQueue.pop_front();
+    sendAccessPayload = true;
+    accessPayload = _accessQueue.front();
   } else if (!_telemetryQueue.empty()) {
-    ok = _googleSheets.sendTelemetry(_telemetryQueue.front());
-    if (ok) _telemetryQueue.pop_front();
+    telemetryPayload = _telemetryQueue.front();
   } else {
+    _forceFlushRequested = false;
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
     return true;
   }
 
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+
+  const bool ok = sendAccessPayload
+                      ? _googleSheets.sendAccess(accessPayload)
+                      : _googleSheets.sendTelemetry(telemetryPayload);
+
+  if (!tryTakeQueueLock()) {
+    return ok;
+  }
+
   if (ok) {
+    if (sendAccessPayload) {
+      if (!_accessQueue.empty()) {
+        _accessQueue.pop_front();
+      }
+    } else if (!_telemetryQueue.empty()) {
+      _telemetryQueue.pop_front();
+    }
     _retryCount = 0;
-    _nextAttemptMs = millis();
+    _nextAttemptMs = millis() + MIN_SEND_GAP_MS;
+    const bool hasMore = !_accessQueue.empty() || !_telemetryQueue.empty();
+    _forceFlushRequested = _forceFlushRequested && hasMore;
+    _lastSendEpoch = static_cast<unsigned long>(time(nullptr));
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+    if (_asyncUploadEnabled && hasMore) {
+      notifyUploader();
+    }
     return true;
   }
 
   backoff();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
   return false;
 }
 
 void NetworkServices::flushQueueTick() {
-  if (millis() < _nextAttemptMs) return;
-  sendOne();
-}
-
-bool NetworkServices::flushNow(uint16_t maxItems) {
-  bool allOk = true;
-  for (uint16_t i = 0; i < maxItems; ++i) {
-    if (_accessQueue.empty() && _telemetryQueue.empty()) break;
-    if (!sendOne()) {
-      allOk = false;
-      break;
-    }
+  if (_asyncUploadEnabled) {
+    notifyUploader();
+    return;
   }
-  return allOk;
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return;
+  }
+  const bool hasPending = !_accessQueue.empty() || !_telemetryQueue.empty();
+  const bool shouldSend =
+      hasPending && (_forceFlushRequested || millis() >= _nextAttemptMs);
+  if (!hasPending) {
+    _forceFlushRequested = false;
+  }
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  if (shouldSend) {
+    sendOne();
+  }
 }
 
 String NetworkServices::doorState() const {
@@ -136,7 +363,8 @@ String NetworkServices::doorState() const {
 
 String NetworkServices::makeTimestampIso8601() const {
   const time_t now = time(nullptr);
-  if (now <= 0) return String(millis());
+  if (now <= 0)
+    return String(millis());
 
   struct tm timeinfo;
   localtime_r(&now, &timeinfo);
@@ -146,7 +374,8 @@ String NetworkServices::makeTimestampIso8601() const {
 }
 
 void NetworkServices::enqueueTelemetry() {
-  if (!_cachedData.valid) return;
+  if (!_cachedData.valid)
+    return;
 
   TelemetryLogPayload payload;
   payload.timestamp = makeTimestampIso8601();
@@ -171,24 +400,33 @@ void NetworkServices::setupRoutes() {
     request->send(200, "text/html", WebPage::SETUP_HTML);
   });
 
-  _server.on("/generate_204", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/gen_204", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/hotspot-detect.html", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/connecttest.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/redirect", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/fwlink", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/canonical.html", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/success.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/ncsi.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/gen_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on(
+      "/hotspot-detect.html", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on(
+      "/connecttest.txt", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/redirect", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/fwlink", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on(
+      "/canonical.html", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/success.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/ncsi.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
 
   _server.on("/api/state", HTTP_GET, [this](AsyncWebServerRequest* request) {
     handleGetState(request);
@@ -231,10 +469,17 @@ void NetworkServices::setupRoutes() {
     handleSendNow(request);
   });
 
-  _server.on("/api/flash/format", HTTP_POST,
-             [this](AsyncWebServerRequest* request) {
-               handleFormatFlash(request);
-             });
+  _server.on(
+      "/api/flash/format", HTTP_POST,
+      [this](AsyncWebServerRequest* request) { handleFormatFlash(request); });
+
+  _server.on(
+      "/api/ota/upload", HTTP_POST,
+      [this](AsyncWebServerRequest* request) { handleOtaUploadResponse(request); },
+      [this](AsyncWebServerRequest* request, const String& filename,
+             size_t index, uint8_t* data, size_t len, bool final) {
+        handleOtaUploadChunk(request, filename, index, data, len, final);
+      });
 
   _server.onNotFound([this](AsyncWebServerRequest* request) {
     if (request->method() == HTTP_DELETE &&
@@ -254,10 +499,9 @@ void NetworkServices::setupRoutes() {
 }
 
 void NetworkServices::setupWiFiRoutes() {
-  _server.on("/api/wifi/scan", HTTP_GET,
-             [this](AsyncWebServerRequest* request) {
-               handleWiFiScan(request);
-             });
+  _server.on(
+      "/api/wifi/scan", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { handleWiFiScan(request); });
 
   AsyncCallbackJsonWebHandler* wifiHandler = new AsyncCallbackJsonWebHandler(
       "/api/wifi/connect",
@@ -282,14 +526,25 @@ void NetworkServices::sendCaptiveRedirect(AsyncWebServerRequest* request) {
   }
 
   AsyncWebServerResponse* response = request->beginResponse(302);
-  response->addHeader("Location", String("http://") + _wifi->getIP().toString() +
-                                      "/setup");
+  response->addHeader("Location",
+                      String("http://") + _wifi->getIP().toString() + "/setup");
   response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   request->send(response);
 }
 
 void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
+  size_t queueTelemetry = telemetryQueueSize();
+  size_t queueAccess = accessQueueSize();
+  unsigned long lastSendEpoch = _lastSendEpoch;
+  if (tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    lastSendEpoch = _lastSendEpoch;
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+
   JsonDocument doc;
+  const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
   doc["temperature"] = _cachedData.temperature;
   doc["humidity"] = _cachedData.humidity;
   doc["valid"] = _cachedData.valid;
@@ -304,8 +559,8 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
   doc["lockoutRemainingSec"] = _access->lockoutRemainingSec();
   doc["failedAttempts"] = _access->failedAttempts();
   doc["accessMessage"] = _access->lastMessage();
-  doc["queueTelemetry"] = _telemetryQueue.size();
-  doc["queueAccess"] = _accessQueue.size();
+  doc["queueTelemetry"] = queueTelemetry;
+  doc["queueAccess"] = queueAccess;
   doc["wifiConnected"] = _wifi->isConnected();
   doc["wifiState"] = _wifi->stateName();
   doc["apMode"] = _wifi->isApMode();
@@ -314,11 +569,15 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
   doc["rssi"] = _wifi->getRSSI();
   doc["mdns"] = _wifi->isConnected() ? LOCAL_MDNS_HOST : "";
   doc["deviceId"] = _config->data.deviceId;
-  doc["lastSend"] = _lastSendEpoch;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  doc["lastSend"] = lastSendEpoch;
+  doc["scanPending"] = _wifi->isScanPending();
+  doc["scanAgeMs"] = _wifi->lastScanAgeMs();
+  doc["otaBusy"] = otaState.busy;
+  doc["otaMode"] = OtaCoordinator::instance().modeName();
+  doc["otaProgress"] = otaState.progress;
+  doc["otaMessage"] = otaState.message;
+  doc["restartPending"] = _pendingRestart;
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
@@ -328,10 +587,7 @@ void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
   doc["fan1BaselineOn"] = _config->data.fan1BaselineOn;
   doc["sensorReadIntervalSec"] = _config->data.sensorReadIntervalSec;
   doc["cloudSendIntervalSec"] = _config->data.cloudSendIntervalSec;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
@@ -365,10 +621,7 @@ void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
   doc["lockoutSecs"] = _config->data.keypadLockoutSec;
   doc["unlockSecs"] = _config->data.solenoidUnlockSec;
   doc["deviceId"] = _config->data.deviceId;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
@@ -397,17 +650,15 @@ void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
   JsonDocument doc;
   JsonArray users = doc["users"].to<JsonArray>();
   for (const auto& user : _config->data.users) {
-    if (user.userId.length() == 0) continue;
+    if (user.userId.length() == 0)
+      continue;
     JsonObject item = users.add<JsonObject>();
     item["userId"] = user.userId;
     item["displayName"] = user.displayName;
     item["enabled"] = user.enabled;
   }
   doc["count"] = users.size();
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
@@ -446,25 +697,41 @@ void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
     return;
   }
   if (!_config->removeUser(userId)) {
-    request->send(500, "application/json", "{\"error\":\"failed to delete user\"}");
+    request->send(500, "application/json",
+                  "{\"error\":\"failed to delete user\"}");
     return;
   }
   request->send(200, "application/json", "{\"success\":true}");
 }
 
 void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
-  const bool ok = flushNow(50);
   JsonDocument doc;
-  doc["success"] = ok;
-  doc["queueTelemetry"] = _telemetryQueue.size();
-  doc["queueAccess"] = _accessQueue.size();
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  if (!_wifi->isConnected()) {
+    doc["success"] = false;
+    doc["error"] = "WiFi not connected";
+  } else if (!_googleSheets.isConfigured()) {
+    doc["success"] = false;
+    doc["error"] = "Google Sheets not configured";
+  } else {
+    if (tryTakeQueueLock()) {
+      _forceFlushRequested = true;
+      _nextAttemptMs = millis();
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+    notifyUploader();
+    doc["success"] = true;
+    doc["pending"] = telemetryQueueSize() > 0 || accessQueueSize() > 0;
+  }
+  doc["queueTelemetry"] = telemetryQueueSize();
+  doc["queueAccess"] = accessQueueSize();
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
-  auto networks = _wifi->scanNow();
+  _wifi->requestScanRefresh();
+  const auto networks = _wifi->getScannedNetworks();
   JsonDocument doc;
   JsonArray arr = doc["networks"].to<JsonArray>();
   for (const auto& net : networks) {
@@ -474,9 +741,9 @@ void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
     obj["open"] = net.open;
     obj["saved"] = net.saved;
   }
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  doc["pending"] = _wifi->isScanPending();
+  doc["scanAgeMs"] = _wifi->lastScanAgeMs();
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
@@ -506,9 +773,7 @@ void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
     doc["success"] = false;
     doc["error"] = "Failed to start WiFi connection";
   }
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
@@ -518,8 +783,131 @@ void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
     return;
   }
 
-  _pendingRestart = true;
-  _restartAtMs = millis() + 750;
+  scheduleRestart("flash format");
+  request->send(
+      200, "application/json",
+      "{\"success\":true,\"message\":\"Flash formatted. Restarting.\"}");
+}
+
+void NetworkServices::handleOtaUploadResponse(AsyncWebServerRequest* request) {
+  FirmwareUploadContext* context = uploadContext(request);
+  JsonDocument doc;
+
+  if (context == nullptr) {
+    doc["success"] = false;
+    doc["error"] = "Tidak ada file firmware";
+    AsyncResponseStream* response =
+        request->beginResponseStream("application/json");
+    response->setCode(400);
+    serializeJson(doc, *response);
+    request->send(response);
+    return;
+  }
+
+  if (context->failed || !context->success) {
+    doc["success"] = false;
+    doc["error"] =
+        context->error.length() > 0 ? context->error : "Upload firmware gagal";
+    AsyncResponseStream* response =
+        request->beginResponseStream("application/json");
+    response->setCode(context->statusCode);
+    serializeJson(doc, *response);
+    request->send(response);
+    clearUploadContext(request);
+    return;
+  }
+
+  scheduleRestart("web ota", 1800);
+  doc["success"] = true;
+  doc["message"] = "Firmware diterima. ESP akan restart.";
+  doc["filename"] = context->filename;
+  doc["bytes"] = context->totalBytes;
   request->send(200, "application/json",
-                "{\"success\":true,\"message\":\"Flash formatted. Restarting.\"}");
+                "{\"success\":true,\"message\":\"Firmware diterima. ESP akan restart.\"}");
+  clearUploadContext(request);
+}
+
+void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
+                                           const String& filename,
+                                           size_t index, uint8_t* data,
+                                           size_t len, bool final) {
+  FirmwareUploadContext* context = uploadContext(request);
+  if (index == 0 && context == nullptr) {
+    context = new FirmwareUploadContext();
+    request->_tempObject = context;
+  }
+  if (context == nullptr || context->failed) {
+    return;
+  }
+
+  if (index == 0) {
+    context->filename = filename.length() > 0 ? filename : "firmware.bin";
+    context->totalBytes = requestFirmwareSize(request);
+
+    if (!context->filename.endsWith(".bin")) {
+      context->failed = true;
+      context->statusCode = 400;
+      context->error = "File firmware harus berekstensi .bin";
+      OtaCoordinator::instance().finishWeb(false, context->error);
+      return;
+    }
+
+    if (!OtaCoordinator::instance().beginWeb(context->totalBytes,
+                                             context->filename)) {
+      context->failed = true;
+      context->statusCode = 409;
+      context->error = "OTA lain sedang berjalan";
+      return;
+    }
+
+    if (!Update.begin(context->totalBytes, U_FLASH)) {
+      context->failed = true;
+      context->statusCode = 500;
+      context->error = String("Gagal memulai update: ") + Update.errorString();
+      OtaCoordinator::instance().finishWeb(false, context->error);
+      Update.abort();
+      return;
+    }
+
+    context->accepted = true;
+  }
+
+  if (!context->accepted) {
+    return;
+  }
+
+  if (len > 0 && Update.write(data, len) != len) {
+    context->failed = true;
+    context->statusCode = 500;
+    context->error = String("Gagal menulis firmware: ") + Update.errorString();
+    OtaCoordinator::instance().finishWeb(false, context->error);
+    Update.abort();
+    return;
+  }
+
+  const size_t writtenBytes = index + len;
+  OtaCoordinator::instance().updateWebProgress(writtenBytes, context->totalBytes);
+
+  if (!final) {
+    return;
+  }
+
+  if (!Update.end(true)) {
+    context->failed = true;
+    context->statusCode = 500;
+    context->error = String("Gagal menyelesaikan update: ") + Update.errorString();
+    OtaCoordinator::instance().finishWeb(false, context->error);
+    Update.abort();
+    return;
+  }
+
+  context->success = true;
+  OtaCoordinator::instance().finishWeb(true, "Web OTA selesai. Menunggu restart");
+}
+
+void NetworkServices::scheduleRestart(const char* reason, unsigned long delayMs) {
+  _pendingRestart = true;
+  _restartReason =
+      (reason != nullptr && reason[0] != '\0') ? reason : "pending operation";
+  _restartAtMs = millis() + delayMs;
 }
