@@ -1,0 +1,318 @@
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xurl}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{setspace}
+\usepackage{enumitem}
+
+\geometry{
+  top=2.5cm,
+  bottom=2cm,
+  left=2.5cm,
+  right=2cm,
+  columnsep=0.7cm
+}
+
+\setlength{\parindent}{0.35cm}
+\setlength{\parskip}{0pt}
+\captionsetup{font=small}
+\renewcommand{\refname}{REFERENCES}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\title{\textbf{Perancangan Smart Server System Berbasis Monitoring Suhu, Kelembapan, dan Keamanan Akses di CV Gundara Solusi Bersama Ungaran}}
+\author{
+Aizaas Vianansa Rochmawan$^{1}$ \\
+$^{1}$Program Studi S1 Sistem Komputer, Universitas Sains dan Teknologi Komputer, Semarang, Indonesia \\
+Email: aizaas.vr@student.stekom.ac.id
+}
+\date{}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\begin{center}
+\small
+\begin{tabularx}{0.96\linewidth}{p{0.26\linewidth}Y}
+\textbf{Article Info} & \textbf{Tanggal:} Received 3 March 2026, Revised 3 March 2026, Accepted 3 March 2026 \\
+\textbf{Jenis Naskah} & Artikel implementasi sistem berbasis IoT untuk monitoring dan keamanan rak server \\
+\textbf{Konteks Studi} & CV Gundara Solusi Bersama, Ungaran \\
+\end{tabularx}
+\end{center}
+
+\begin{abstract}
+Pengelolaan rak server menuntut kontrol termal dan keamanan akses fisik yang stabil, terukur, dan dapat diaudit. Kondisi studi menunjukkan kebutuhan integrasi antara pemantauan suhu-kelembapan, kendali pendinginan bertingkat, autentikasi akses, serta pencatatan log terpusat. Penelitian ini menyusun implementasi \textit{Smart Server System} berbasis ESP32 dengan sensor SHT21, keypad 4x4, relay, kipas DC, solenoid lock, dashboard lokal, dan logging cloud melalui Google Apps Script--Google Sheets. Metode mencakup perancangan arsitektur perangkat keras-perangkat lunak, penetapan kontrak API lokal, implementasi manajemen antrian log, serta validasi berbasis skenario uji skrip. Hasil implementasi kode menunjukkan logika termal berjalan sesuai konfigurasi default (\textit{warn} 27.0$^\circ$C, \textit{stage2} 28.0$^\circ$C), lockout keamanan aktif setelah tiga kegagalan autentikasi, dan mekanisme \textit{retry backoff} pada pengiriman log cloud. Eksekusi 12 skenario skrip uji pada 3 March 2026 menghasilkan 7 skenario sukses, 1 gagal koneksi, dan 4 timeout, yang mengindikasikan fungsi inti sistem berjalan namun reliabilitas jalur jaringan eksternal masih perlu penguatan. Kontribusi naskah ini adalah menyediakan draft jurnal yang lebih lengkap, berbasis artefak kode aktual, dan siap dilanjutkan ke pengujian lapangan terstruktur.
+\end{abstract}
+
+\textbf{Keywords}: akses fisik, ESP32, kelembapan, monitoring suhu, smart server
+
+\section{INTRODUCTION}
+Rak server merupakan komponen kritis infrastruktur teknologi informasi karena menampung perangkat yang beroperasi kontinyu pada beban dinamis. Standar operasional data center menekankan batas lingkungan termal tertentu agar perangkat tidak mengalami penurunan kinerja maupun kegagalan prematur \cite{ashrae2021,tia942}. Selain dimensi termal, aspek keamanan fisik harus mampu menjaga prinsip \textit{confidentiality}, \textit{integrity}, dan \textit{availability} \cite{stallings2017}.
+
+Dalam konteks studi, perangkat server menangani data operasional proyek strategis sehingga dibutuhkan sistem monitoring yang tidak hanya menampilkan suhu-kelembapan, namun juga memberikan reaksi otomatis terhadap anomali. Draft Proposal Rev 2 mendokumentasikan bahwa pendekatan sebelumnya masih bergantung pada pendinginan ruangan, belum memiliki penguncian adaptif terhadap percobaan akses ilegal, dan belum menata jejak audit akses secara konsisten \cite{proposal_rev2_2026}.
+
+Penelitian ini mengadopsi pendekatan implementatif: memetakan kebutuhan operasional ke modul firmware ESP32, layanan jaringan lokal, dan backend logging cloud. Sistem dikembangkan menggunakan stack yang telah terdokumentasi di repositori proyek, termasuk PlatformIO, Arduino framework, ArduinoJson, serta integrasi Apps Script \cite{repo_readme_2026,repo_firmware_2026,platformio_docs,arduinojson_docs}.
+
+Agar sejalan dengan format jurnal, naskah ini tidak berhenti pada deskripsi komponen, melainkan menyajikan model kontrol, kontrak API, matriks skenario pengujian, hasil eksekusi aktual, serta keterbatasan teknis yang masih harus dituntaskan.
+
+Kontribusi kerja dirangkum sebagai berikut:
+\begin{enumerate}[leftmargin=*,nosep]
+\item Menyusun model kendali termal bertingkat berbasis threshold dengan parameter yang dapat dikonfigurasi.
+\item Mengimplementasikan keamanan akses berbasis PIN hash SHA-256 dengan lockout otomatis.
+\item Menetapkan kontrak endpoint REST dan skema payload untuk \textit{telemetry\_logs} dan \textit{access\_logs}.
+\item Menyajikan evaluasi berbasis skenario uji skrip yang dapat direplikasi.
+\end{enumerate}
+
+\section{THEORETICAL BASIS AND PROPOSED ARCHITECTURE}
+\subsection{Model Kontrol Termal}
+Sistem menggunakan dua ambang suhu: $T_{warn}$ dan $T_{stage2}$. Dengan suhu aktual $T(t)$ dan validitas sensor $V(t)$, status peringatan didefinisikan sebagai:
+\begin{equation}
+W(t)=
+\begin{cases}
+1,& \text{jika } V(t)=1 \land T(t)>T_{warn}\\
+0,& \text{lainnya}
+\end{cases}
+\end{equation}
+
+Aktivasi kipas tahap 2:
+\begin{equation}
+F_2(t)=
+\begin{cases}
+1,& \text{jika } V(t)=1 \land T(t)\ge T_{stage2}\\
+0,& \text{lainnya}
+\end{cases}
+\end{equation}
+
+Aktivasi kipas tahap 1 mengikuti baseline sistem:
+\begin{equation}
+F_1(t)=B \lor W(t) \lor F_2(t)
+\end{equation}
+
+dengan $B$ adalah \textit{fan1BaselineOn}. Implementasi ini konsisten dengan logika pada firmware \cite{repo_firmware_2026}.
+
+\subsection{Model Keamanan Akses}
+Untuk setiap percobaan autentikasi ke-$k$, status akses didefinisikan:
+\begin{equation}
+A_k=
+\begin{cases}
+\text{GRANTED},& \text{jika hash(PIN)}=\text{hash tersimpan}\\
+\text{DENIED},& \text{jika tidak cocok}
+\end{cases}
+\end{equation}
+
+Jika jumlah kegagalan berurutan mencapai $N_{max}$, sistem masuk state lockout selama $L$ detik:
+\begin{equation}
+\sum_{i=1}^{m} [A_i=\text{DENIED}] \ge N_{max} \Rightarrow \text{LOCKOUT}(L)
+\end{equation}
+
+Nilai default implementasi adalah $N_{max}=3$ dan $L=120$ detik \cite{repo_firmware_2026}.
+
+\subsection{Arsitektur Usulan}
+Secara konseptual, arsitektur dibagi menjadi empat lapisan: sensor-input, kontrol-aktuasi, layanan jaringan, dan logging cloud. Ringkasan komponen disajikan pada Tabel~\ref{tab:komponen}.
+
+\begin{table}[h]
+\centering
+\caption{Komponen utama dan peran fungsional}
+\label{tab:komponen}
+\begin{tabularx}{0.98\columnwidth}{p{0.24\columnwidth}Y}
+\toprule
+\textbf{Komponen} & \textbf{Peran} \\ \midrule
+ESP32 & Pengendali utama, host API lokal, orkestrasi modul \textit{sensor-access-network}. \\
+SHT21 & Akuisisi suhu dan kelembapan melalui I2C. \\
+Keypad 4x4 & Input PIN pengguna/admin untuk autentikasi. \\
+Relay CH1-CH2 & Kendali fan pendinginan tahap 1 dan tahap 2. \\
+Relay CH3 + Solenoid & Kendali buka-kunci pintu berdasarkan hasil autentikasi. \\
+LCD 20x4 & Monitoring lokal (telemetri, status akses, lockout). \\
+Google Apps Script & Endpoint logging cloud untuk \textit{telemetry\_logs} dan \textit{access\_logs}. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{METHOD}
+\subsection{Pendekatan Pengembangan}
+Pengembangan dilakukan secara iteratif dengan tahapan: analisis kebutuhan, implementasi modul, integrasi antarmodul, validasi skenario, dan dokumentasi hasil. Pendekatan ini dipilih agar perubahan konfigurasi dan perilaku sistem dapat diverifikasi bertahap pada level fungsi.
+
+\subsection{Sumber Data dan Instrumen Validasi}
+Sumber data penelitian dibagi menjadi tiga:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \textbf{Hasil implementasi kode}: analisis langsung file firmware dan konfigurasi \cite{repo_firmware_2026}.
+\item \textbf{Hasil simulasi script test}: skenario pengiriman payload di folder \texttt{tests} \cite{repo_tests_2026}.
+\item \textbf{Placeholder uji lapangan}: ruang untuk metrik yang belum tersedia saat penyusunan naskah.
+\end{enumerate}
+
+Instrumen evaluasi meliputi pemeriksaan konsistensi logika, kelengkapan field payload, stabilitas state keamanan, dan status respons layanan cloud.
+
+\subsection{Kontrak Endpoint REST}
+Endpoint lokal yang diimplementasikan ditunjukkan pada Tabel~\ref{tab:endpoint}. Format ini disusun lebih rinci agar mudah direplikasi saat pengujian atau integrasi dashboard.
+
+\begin{table}[h]
+\centering
+\caption{Kontrak endpoint REST lokal}
+\label{tab:endpoint}
+\scriptsize
+\begin{tabularx}{0.98\columnwidth}{p{0.12\columnwidth}p{0.33\columnwidth}Y}
+\toprule
+\textbf{Method} & \textbf{Route} & \textbf{Fungsi} \\ \midrule
+GET & \texttt{/api/state} & Mengembalikan telemetri, status fan/alarm, lockout, RSSI, dan antrean log. \\
+GET/POST & \texttt{/api/config/thermal} & Membaca/mengubah threshold termal, baseline fan, interval sensor/cloud. \\
+GET/POST & \texttt{/api/config/security} & Membaca/mengubah batas gagal, durasi lockout, unlock solenoid, device ID. \\
+GET/POST & \texttt{/api/users} & Daftar pengguna dan upsert user berbasis PIN hash. \\
+DELETE & \texttt{/api/users/\{id\}} & Menghapus user berdasarkan \textit{userId}. \\
+POST & \texttt{/api/send} & Memaksa flush antrean akses+telemetri ke cloud. \\
+GET & \texttt{/api/wifi/scan} & Pindai jaringan WiFi sekitar dan status saved/open. \\
+POST & \texttt{/api/wifi/connect} & Simpan kredensial dan lakukan upaya koneksi STA. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Desain Skenario Uji}
+Matriks skenario mengikuti file \texttt{test\_*.py} pada repositori. Daftar skenario disajikan pada Tabel~\ref{tab:scenario-matrix}.
+
+\begin{table}[h]
+\centering
+\caption{Matriks skenario uji berbasis script}
+\label{tab:scenario-matrix}
+\scriptsize
+\begin{tabularx}{0.98\columnwidth}{p{0.42\columnwidth}Y}
+\toprule
+\textbf{File Skenario} & \textbf{Tujuan Uji} \\ \midrule
+\texttt{test\_telemetry\_normal.py} & Validasi payload kondisi normal. \\
+\texttt{test\_telemetry\_warning.py} & Validasi payload saat suhu melewati threshold peringatan. \\
+\texttt{test\_telemetry\_alarm.py} & Validasi payload alarm suhu kritis. \\
+\texttt{test\_telemetry\_fans\_off.py} & Validasi kondisi fan nonaktif. \\
+\texttt{test\_telemetry\_high\_humidity.py} & Validasi payload kelembapan tinggi. \\
+\texttt{test\_telemetry\_rssi\_good.py} & Validasi pelaporan RSSI kuat. \\
+\texttt{test\_telemetry\_rssi\_bad.py} & Validasi pelaporan RSSI lemah. \\
+\texttt{test\_telemetry\_door\_unlocked.py} & Validasi status pintu unlock pada payload telemetri. \\
+\texttt{test\_access\_granted.py} & Validasi log akses diterima. \\
+\texttt{test\_access\_denied.py} & Validasi log akses ditolak. \\
+\texttt{test\_access\_lockout.py} & Validasi log lockout saat gagal berulang. \\
+\texttt{test\_access\_unknown\_user.py} & Validasi log user tidak dikenal. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Kriteria Evaluasi}
+Kriteria evaluasi dibagi menjadi:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \textbf{Konsistensi logika}: perilaku modul sesuai aturan implementasi di source code.
+\item \textbf{Kelengkapan data}: field payload sesuai kontrak \textit{telemetry\_logs/access\_logs}.
+\item \textbf{Stabilitas eksekusi}: skenario skrip mampu mengembalikan respons JSON \texttt{\{"ok":true\}}.
+\item \textbf{Transparansi hasil}: jika ada timeout atau kegagalan koneksi, dicatat sebagai temuan, bukan disembunyikan.
+\end{enumerate}
+
+\section{RESULTS AND DISCUSSION}
+\subsection{Hasil Implementasi Kode}
+Audit terhadap modul inti memperlihatkan keterhubungan antarlayer yang jelas.
+
+\textbf{(1) Layer termal dan aktuasi}. Firmware memproses validitas sensor, menghitung state peringatan, lalu mengendalikan dua fan sesuai aturan threshold. Pendekatan ini menjaga transisi dari kondisi normal ke kondisi kritis secara deterministik.
+
+\textbf{(2) Layer keamanan}. Proses autentikasi menggunakan hash SHA-256, pencatatan event akses, dan lockout otomatis setelah batas percobaan gagal. State keamanan ini disinkronkan ke UI lokal serta endpoint status.
+
+\textbf{(3) Layer jaringan dan cloud logging}. Sistem memiliki queue terpisah untuk telemetri dan akses, prioritas kirim log akses, serta \textit{exponential backoff}. Strategi ini penting untuk menahan kehilangan log saat koneksi tidak stabil.
+
+\subsection{Hasil Eksekusi Aktual Skenario Script Test}
+Eksekusi aktual dilakukan pada \textbf{Selasa, 3 March 2026} dengan wrapper timeout 25 detik per skrip. Ringkasan hasil ditunjukkan pada Tabel~\ref{tab:run-summary}.
+
+\begin{table}[h]
+\centering
+\caption{Ringkasan hasil eksekusi 12 skenario}
+\label{tab:run-summary}
+\begin{tabularx}{0.98\columnwidth}{p{0.38\columnwidth}Y}
+\toprule
+\textbf{Status} & \textbf{Jumlah} \\ \midrule
+PASS (respons \texttt{\{"ok":true\}}) & 7 \\
+FAIL (error koneksi) & 1 \\
+TIMEOUT & 4 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Detail hasil per skenario disajikan pada Tabel~\ref{tab:run-detail}.
+
+\begin{table}[h]
+\centering
+\caption{Detail status per file skenario}
+\label{tab:run-detail}
+\scriptsize
+\begin{tabularx}{0.98\columnwidth}{p{0.43\columnwidth}p{0.2\columnwidth}Y}
+\toprule
+\textbf{File} & \textbf{Status} & \textbf{Catatan} \\ \midrule
+\texttt{test\_access\_denied.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_access\_granted.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_access\_lockout.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_access\_unknown\_user.py} & TIMEOUT & Tidak selesai dalam 25 detik. \\
+\texttt{test\_telemetry\_alarm.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_telemetry\_door\_unlocked.py} & FAIL & \textit{Connection reset by peer}. \\
+\texttt{test\_telemetry\_fans\_off.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_telemetry\_high\_humidity.py} & TIMEOUT & Tidak selesai dalam 25 detik. \\
+\texttt{test\_telemetry\_normal.py} & PASS & JSON \texttt{ok:true}. \\
+\texttt{test\_telemetry\_rssi\_bad.py} & TIMEOUT & Tidak selesai dalam 25 detik. \\
+\texttt{test\_telemetry\_rssi\_good.py} & TIMEOUT & Tidak selesai dalam 25 detik. \\
+\texttt{test\_telemetry\_warning.py} & PASS & JSON \texttt{ok:true}. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Hasil ini menunjukkan fungsi inti payload logger sudah berjalan, tetapi ketergantungan pada endpoint eksternal membuat reliabilitas eksekusi batch sensitif terhadap kondisi jaringan. Ini konsisten dengan desain sistem yang memang mengandalkan jalur internet untuk sinkronisasi cloud.
+
+\subsection{Pembahasan Teknis dan Implikasi}
+Dari sisi rekayasa sistem, terdapat tiga implikasi penting:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \textbf{Keandalan lokal lebih tinggi dari cloud path}. Modul kontrol termal-keamanan tetap deterministik karena berjalan di perangkat, sedangkan keberhasilan logging dipengaruhi availability jaringan.
+\item \textbf{Queue dan retry backoff sudah tepat}. Mekanisme ini relevan untuk mencegah kehilangan log saat gangguan sementara, walaupun belum menggantikan kebutuhan observabilitas jaringan yang lebih dalam.
+\item \textbf{Kesiapan audit sudah baik namun belum final}. Struktur field access log sudah cukup untuk jejak audit, tetapi kualitas data waktu nyata tetap bergantung pada stabilitas koneksi internet.
+\end{enumerate}
+
+\subsection{Keterbatasan dan Placeholder Uji Lapangan}
+Keterbatasan yang wajib dicatat pada tahap ini:
+\begin{enumerate}[leftmargin=*,nosep]
+\item status pintu masih diturunkan dari event solenoid, belum dari sensor reed switch fisik,
+\item HTTPS client masih memakai \texttt{setInsecure},
+\item metrik kuantitatif lapangan jangka panjang belum tersedia.
+\end{enumerate}
+
+Rencana metrik lapangan disajikan pada Tabel~\ref{tab:field-placeholder}.
+
+\begin{table}[h]
+\centering
+\caption{Placeholder metrik uji lapangan lanjutan}
+\label{tab:field-placeholder}
+\begin{tabularx}{0.98\columnwidth}{p{0.36\columnwidth}p{0.2\columnwidth}Y}
+\toprule
+\textbf{Metrik} & \textbf{Status} & \textbf{Keterangan} \\ \midrule
+Waktu respons unlock & Placeholder & Dari submit PIN valid sampai relay solenoid aktif. \\
+Stabilisasi suhu rak & Placeholder & Tren suhu sebelum-sesudah fan bertingkat aktif. \\
+Reliabilitas pengiriman log 24 jam & Placeholder & Rasio sukses kirim terhadap total event. \\
+Dampak kualitas RSSI pada latensi kirim & Placeholder & Pengukuran pada beberapa level RSSI terkontrol. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{CONCLUSION}
+Naskah ini merevisi draft jurnal ke format yang lebih lengkap dan lebih dekat dengan pedoman template, dengan basis fakta dari source code, konfigurasi runtime, serta hasil eksekusi skenario uji yang terdokumentasi. Secara teknis, sistem telah menunjukkan integrasi fungsional antara monitoring termal, keamanan akses, API konfigurasi, dan logging cloud.
+
+Eksekusi aktual pada 12 skenario skrip menunjukkan mayoritas skenario berhasil, namun masih ditemukan kegagalan/timeout pada sebagian skenario akibat jalur koneksi eksternal. Temuan ini mempertegas bahwa layer kontrol lokal sudah siap operasional, sementara layer cloud masih perlu penguatan reliabilitas end-to-end.
+
+Pekerjaan lanjutan direkomendasikan pada: (1) integrasi sensor status pintu fisik, (2) penguatan TLS verification tanpa \texttt{setInsecure}, (3) kampanye uji lapangan terstruktur dengan metrik kuantitatif yang konsisten.
+
+\section*{Acknowledgements}
+Terima kasih kepada pembimbing akademik, tim operasional, dan pihak CV Gundara Solusi Bersama yang menyediakan konteks implementasi serta kebutuhan sistem.
+
+\bibliographystyle{IEEEtran}
+\bibliography{rev2_references}
+
+\end{document}

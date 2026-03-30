@@ -7,19 +7,85 @@ constexpr const char* DEFAULT_DEVICE_ID = "esp32-smart-server-01";
 constexpr const char* DEFAULT_GSCRIPT_URL =
     "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec";
 
-bool isStrictSchemaValid(const JsonDocument& doc) {
-  return doc[ConfigKeys::WIFI_NETWORKS].is<JsonArray>() &&
-         doc[ConfigKeys::USERS].is<JsonArray>() &&
-         doc[ConfigKeys::SENSOR_INTERVAL].is<uint32_t>() &&
-         doc[ConfigKeys::CLOUD_INTERVAL].is<uint32_t>() &&
-         doc[ConfigKeys::WARN_THRESHOLD].is<float>() &&
-         doc[ConfigKeys::STAGE2_THRESHOLD].is<float>() &&
-         doc[ConfigKeys::FAN1_BASELINE].is<bool>() &&
-         doc[ConfigKeys::MAX_FAILED].is<uint8_t>() &&
-         doc[ConfigKeys::KEYPAD_LOCKOUT].is<uint32_t>() &&
-         doc[ConfigKeys::SOLENOID_UNLOCK].is<uint32_t>() &&
-         doc[ConfigKeys::GOOGLE_SCRIPT_URL].is<const char*>() &&
-         doc[ConfigKeys::DEVICE_ID].is<const char*>();
+constexpr const char* LEGACY_WIFI_NETWORKS = "wifiNetworks";
+constexpr const char* LEGACY_USERS = "userCredentials";
+constexpr const char* LEGACY_SSID = "ssid";
+constexpr const char* LEGACY_PASSWORD = "password";
+constexpr const char* LEGACY_USER_ID = "userId";
+constexpr const char* LEGACY_DISPLAY_NAME = "displayName";
+constexpr const char* LEGACY_PIN_HASH = "pinHash";
+constexpr const char* LEGACY_SENSOR_INTERVAL = "sensorReadIntervalSec";
+constexpr const char* LEGACY_CLOUD_INTERVAL = "cloudSendIntervalSec";
+constexpr const char* LEGACY_WARN_THRESHOLD = "warnThreshold";
+constexpr const char* LEGACY_STAGE2_THRESHOLD = "stage2Threshold";
+constexpr const char* LEGACY_FAN1_BASELINE = "fan1BaselineOn";
+constexpr const char* LEGACY_MAX_FAILED = "maxFail";
+constexpr const char* LEGACY_KEYPAD_LOCKOUT = "lockoutSecs";
+constexpr const char* LEGACY_SOLENOID_UNLOCK = "unlockSecs";
+constexpr const char* LEGACY_GOOGLE_SCRIPT_URL = "googleScriptUrl";
+constexpr const char* LEGACY_DEVICE_ID = "deviceId";
+
+template <typename TContainer>
+JsonVariantConst getField(const TContainer& container, const char* primary,
+                          const char* legacy, bool* usedLegacy = nullptr) {
+  JsonVariantConst value = container[primary];
+  if (!value.isNull()) return value;
+  if (legacy == nullptr) return JsonVariantConst();
+
+  value = container[legacy];
+  if (!value.isNull() && usedLegacy != nullptr) *usedLegacy = true;
+  return value;
+}
+
+template <typename TValue, typename TContainer>
+bool readField(const TContainer& container, const char* primary,
+               const char* legacy, TValue& out, bool* usedLegacy = nullptr) {
+  JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
+  if (value.isNull()) return false;
+  out = value.as<TValue>();
+  return true;
+}
+
+template <typename TContainer>
+bool readBoolField(const TContainer& container, const char* primary,
+                   const char* legacy, bool& out,
+                   bool* usedLegacy = nullptr) {
+  JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
+  if (value.isNull()) return false;
+
+  if (value.is<bool>()) {
+    out = value.as<bool>();
+    return true;
+  }
+  if (value.is<const char*>()) {
+    String text = value.as<String>();
+    text.trim();
+    text.toLowerCase();
+    if (text == "true" || text == "1") {
+      out = true;
+      return true;
+    }
+    if (text == "false" || text == "0") {
+      out = false;
+      return true;
+    }
+  }
+  if (value.is<int>() || value.is<long>() || value.is<unsigned int>() ||
+      value.is<uint32_t>()) {
+    out = value.as<long>() != 0;
+    return true;
+  }
+
+  return false;
+}
+
+template <typename TContainer>
+JsonArrayConst readArrayField(const TContainer& container, const char* primary,
+                              const char* legacy,
+                              bool* usedLegacy = nullptr) {
+  JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
+  if (value.is<JsonArrayConst>()) return value.as<JsonArrayConst>();
+  return JsonArrayConst();
 }
 }  // namespace
 
@@ -57,10 +123,18 @@ AppConfig::AppConfig() {
 ConfigManager::ConfigManager(const char* filename) : _filename(filename) {}
 
 bool ConfigManager::begin() {
-  if (!LittleFS.begin(true)) {
-    Serial.println(F("LittleFS mount failed"));
-    return false;
+  if (!LittleFS.begin(false)) {
+    Serial.println(F("LittleFS mount failed, formatting"));
+    if (!LittleFS.format()) {
+      Serial.println(F("LittleFS format failed"));
+      return false;
+    }
+    if (!LittleFS.begin(false)) {
+      Serial.println(F("LittleFS mount failed after format"));
+      return false;
+    }
   }
+  Serial.println(F("LittleFS mounted"));
   return load();
 }
 
@@ -85,54 +159,109 @@ bool ConfigManager::load() {
     return resetToDefaultsAndSave();
   }
 
-  if (!isStrictSchemaValid(doc)) {
-    Serial.println(F("Config schema invalid/legacy. Resetting defaults."));
-    return resetToDefaultsAndSave();
-  }
+  data = AppConfig();
 
-  for (auto& network : data.wifiNetworks) {
-    network = WiFiCredential{};
-    network.enabled = false;
-  }
-  for (auto& user : data.users) {
-    user = UserCredential{};
-    user.enabled = false;
-  }
+  bool recognized = false;
+  bool migrated = false;
 
   size_t i = 0;
-  for (JsonObject net : doc[ConfigKeys::WIFI_NETWORKS].as<JsonArray>()) {
+  for (JsonObjectConst net :
+       readArrayField(doc, ConfigKeys::WIFI_NETWORKS, LEGACY_WIFI_NETWORKS,
+                      &migrated)) {
     if (i >= MAX_WIFI_NETWORKS) break;
-    data.wifiNetworks[i].ssid = net[ConfigKeys::SSID].as<String>();
-    data.wifiNetworks[i].password = net[ConfigKeys::PASSWORD].as<String>();
-    data.wifiNetworks[i].enabled = net[ConfigKeys::ENABLED] | true;
-    ++i;
+
+    WiFiCredential network;
+    network.enabled = true;
+    readField(net, ConfigKeys::SSID, LEGACY_SSID, network.ssid, &migrated);
+    readField(net, ConfigKeys::PASSWORD, LEGACY_PASSWORD, network.password,
+              &migrated);
+    readBoolField(net, ConfigKeys::ENABLED, "enabled", network.enabled,
+                  &migrated);
+    if (network.ssid.length() == 0) continue;
+
+    data.wifiNetworks[i++] = network;
+    recognized = true;
   }
 
   i = 0;
-  for (JsonObject user : doc[ConfigKeys::USERS].as<JsonArray>()) {
+  for (JsonObjectConst user :
+       readArrayField(doc, ConfigKeys::USERS, LEGACY_USERS, &migrated)) {
     if (i >= MAX_USERS) break;
-    data.users[i].userId = user[ConfigKeys::USER_ID].as<String>();
-    data.users[i].displayName = user[ConfigKeys::DISPLAY_NAME].as<String>();
-    data.users[i].pinHash = user[ConfigKeys::PIN_HASH].as<String>();
-    data.users[i].enabled = user[ConfigKeys::ENABLED] | true;
-    ++i;
+
+    UserCredential credential;
+    credential.enabled = true;
+    readField(user, ConfigKeys::USER_ID, LEGACY_USER_ID, credential.userId,
+              &migrated);
+    readField(user, ConfigKeys::DISPLAY_NAME, LEGACY_DISPLAY_NAME,
+              credential.displayName, &migrated);
+    readField(user, ConfigKeys::PIN_HASH, LEGACY_PIN_HASH, credential.pinHash,
+              &migrated);
+    readBoolField(user, ConfigKeys::ENABLED, "enabled", credential.enabled,
+                  &migrated);
+    if (credential.userId.length() == 0) continue;
+
+    data.users[i++] = credential;
+    recognized = true;
   }
 
-  data.sensorReadIntervalSec = doc[ConfigKeys::SENSOR_INTERVAL].as<uint32_t>();
-  data.cloudSendIntervalSec = doc[ConfigKeys::CLOUD_INTERVAL].as<uint32_t>();
-  data.warnThresholdC = doc[ConfigKeys::WARN_THRESHOLD].as<float>();
-  data.stage2ThresholdC = doc[ConfigKeys::STAGE2_THRESHOLD].as<float>();
-  data.fan1BaselineOn = doc[ConfigKeys::FAN1_BASELINE].as<bool>();
-  data.maxFailedAttempts = doc[ConfigKeys::MAX_FAILED].as<uint8_t>();
-  data.keypadLockoutSec = doc[ConfigKeys::KEYPAD_LOCKOUT].as<uint32_t>();
-  data.solenoidUnlockSec = doc[ConfigKeys::SOLENOID_UNLOCK].as<uint32_t>();
-  data.googleScriptUrl = doc[ConfigKeys::GOOGLE_SCRIPT_URL].as<String>();
-  data.deviceId = doc[ConfigKeys::DEVICE_ID].as<String>();
+  recognized |= readField(doc, ConfigKeys::SENSOR_INTERVAL,
+                          LEGACY_SENSOR_INTERVAL, data.sensorReadIntervalSec,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::CLOUD_INTERVAL,
+                          LEGACY_CLOUD_INTERVAL, data.cloudSendIntervalSec,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::WARN_THRESHOLD,
+                          LEGACY_WARN_THRESHOLD, data.warnThresholdC,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::STAGE2_THRESHOLD,
+                          LEGACY_STAGE2_THRESHOLD, data.stage2ThresholdC,
+                          &migrated);
+  recognized |= readBoolField(doc, ConfigKeys::FAN1_BASELINE,
+                              LEGACY_FAN1_BASELINE, data.fan1BaselineOn,
+                              &migrated);
+  recognized |= readField(doc, ConfigKeys::MAX_FAILED, LEGACY_MAX_FAILED,
+                          data.maxFailedAttempts, &migrated);
+  recognized |= readField(doc, ConfigKeys::KEYPAD_LOCKOUT,
+                          LEGACY_KEYPAD_LOCKOUT, data.keypadLockoutSec,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::SOLENOID_UNLOCK,
+                          LEGACY_SOLENOID_UNLOCK, data.solenoidUnlockSec,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::GOOGLE_SCRIPT_URL,
+                          LEGACY_GOOGLE_SCRIPT_URL, data.googleScriptUrl,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::DEVICE_ID, LEGACY_DEVICE_ID,
+                          data.deviceId, &migrated);
 
-  if (data.googleScriptUrl.length() == 0 || data.deviceId.length() == 0 ||
-      getUserCount() == 0) {
-    Serial.println(F("Config incomplete. Resetting defaults."));
+  if (!recognized) {
+    Serial.println(F("Config schema unrecognized. Resetting defaults."));
     return resetToDefaultsAndSave();
+  }
+
+  bool repaired = false;
+  if (data.googleScriptUrl.length() == 0) {
+    data.googleScriptUrl = DEFAULT_GSCRIPT_URL;
+    repaired = true;
+  }
+  if (data.deviceId.length() == 0) {
+    data.deviceId = DEFAULT_DEVICE_ID;
+    repaired = true;
+  }
+  if (getUserCount() == 0) {
+    data.users[0].userId = "admin";
+    data.users[0].displayName = "Administrator";
+    data.users[0].pinHash = DEFAULT_ADMIN_HASH;
+    data.users[0].enabled = true;
+    repaired = true;
+    Serial.println(F("Config has no users. Restored default admin."));
+  }
+
+  if (migrated) {
+    Serial.println(F("Config legacy/missing fields migrated to current schema."));
+  }
+
+  if (migrated || repaired) {
+    save();
   }
 
   Serial.println(F("Config loaded"));
@@ -140,6 +269,7 @@ bool ConfigManager::load() {
 }
 
 bool ConfigManager::save() {
+  static constexpr const char* TEMP_FILENAME = "/config.tmp";
   JsonDocument doc;
 
   JsonArray wifiArr = doc[ConfigKeys::WIFI_NETWORKS].to<JsonArray>();
@@ -172,15 +302,50 @@ bool ConfigManager::save() {
   doc[ConfigKeys::GOOGLE_SCRIPT_URL] = data.googleScriptUrl;
   doc[ConfigKeys::DEVICE_ID] = data.deviceId;
 
-  File file = LittleFS.open(_filename, "w");
+  File file = LittleFS.open(TEMP_FILENAME, "w");
   if (!file) {
     Serial.println(F("Failed to open config file for writing"));
     return false;
   }
 
-  serializeJson(doc, file);
+  const size_t written = serializeJson(doc, file);
+  file.flush();
   file.close();
+
+  if (written == 0) {
+    Serial.println(F("Failed to serialize config"));
+    LittleFS.remove(TEMP_FILENAME);
+    return false;
+  }
+
+  LittleFS.remove(_filename);
+  if (!LittleFS.rename(TEMP_FILENAME, _filename)) {
+    Serial.println(F("Failed to replace config file"));
+    LittleFS.remove(TEMP_FILENAME);
+    return false;
+  }
+
+  Serial.printf("Config saved: wifi=%u users=%u\n",
+                static_cast<unsigned>(getWiFiCount()),
+                static_cast<unsigned>(getUserCount()));
   return true;
+}
+
+bool ConfigManager::formatFileSystem() {
+  Serial.println(F("Formatting LittleFS and restoring defaults"));
+  LittleFS.end();
+
+  if (!LittleFS.format()) {
+    Serial.println(F("LittleFS format failed"));
+    return false;
+  }
+  if (!LittleFS.begin(false)) {
+    Serial.println(F("LittleFS remount failed after format"));
+    return false;
+  }
+
+  data = AppConfig();
+  return save();
 }
 
 bool ConfigManager::addWiFi(const String& ssid, const String& password) {
@@ -256,6 +421,10 @@ bool ConfigManager::upsertUser(const UserCredential& user) {
 bool ConfigManager::removeUser(const String& userId) {
   for (auto& user : data.users) {
     if (user.userId == userId) {
+      if (user.enabled && getUserCount() <= 1) {
+        Serial.println(F("Refusing to delete last enabled user"));
+        return false;
+      }
       user.userId = "";
       user.displayName = "";
       user.pinHash = "";

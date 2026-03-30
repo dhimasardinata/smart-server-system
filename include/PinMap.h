@@ -14,8 +14,11 @@ constexpr uint8_t LCD_ROWS = 4;
 constexpr uint8_t RELAY_FAN1 = 4;
 constexpr uint8_t RELAY_FAN2 = 18;
 constexpr uint8_t RELAY_SOLENOID = 19;
+constexpr uint8_t RELAY_ALERT = 23;
 
-constexpr bool RELAY_ACTIVE_LOW = true;
+constexpr bool RELAY_ACTIVE_LOW = false;
+constexpr bool SOLENOID_ACTIVE_LOW = false;
+constexpr bool ALERT_ACTIVE_LOW = false;
 
 constexpr uint8_t KEYPAD_ROWS = 4;
 constexpr uint8_t KEYPAD_COLS = 4;

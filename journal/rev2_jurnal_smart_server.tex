@@ -1,0 +1,177 @@
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{url}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=black]{hyperref}
+\usepackage{natbib}
+
+\geometry{
+  top=2.2cm,
+  bottom=2.0cm,
+  left=2.0cm,
+  right=2.0cm,
+  columnsep=0.7cm
+}
+
+\setlength{\parindent}{0.35cm}
+\setlength{\parskip}{0pt}
+\renewcommand{\refname}{REFERENCES}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\begin{document}
+
+\begin{center}
+\footnotesize
+p-ISSN: 1907-0012; e-ISSN: 2714-5417 \\
+ELKOM, Vol. 18, No. 1, April 2026, pp. xx-xx \\
+\url{http://ejournal.stekom.ac.id/index.php/elkom}
+\end{center}
+
+\vspace{0.2cm}
+\begin{center}
+{\Large\bfseries Perancangan Smart Server System Berbasis Monitoring Suhu, Kelembapan, dan Keamanan Akses di CV Gundara Solusi Bersama Ungaran}\\[0.3cm]
+Aizaas Vianansa Rochmawan$^1$\\
+$^1$Program Studi S1 Sistem Komputer, Universitas Sains dan Teknologi Komputer, Semarang, Indonesia\\
+Email: aizaas.vr@student.stekom.ac.id
+\end{center}
+
+\vspace{0.2cm}
+\noindent
+\begin{minipage}[t]{0.30\linewidth}
+\textbf{Article Info}\\
+\rule{\linewidth}{0.4pt}\\
+\textbf{Received}: 3 March 2026\\
+\textbf{Revised}: 3 March 2026\\
+\textbf{Accepted}: 3 March 2026\\
+\textbf{Konteks}: Implementasi Smart Server ESP32 di CV Gundara Solusi Bersama
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.67\linewidth}
+\textbf{ABSTRACT}\\
+Penelitian ini menyajikan revisi naskah jurnal implementasi Smart Server ESP32 untuk pemantauan suhu-kelembapan dan keamanan akses rak server pada CV Gundara Solusi Bersama. Latar belakang penelitian adalah kebutuhan menjaga kondisi termal rak pada rentang aman dan menguatkan keamanan fisik akses perangkat server secara berkelanjutan. Metode penelitian mengikuti proposal, yaitu model pengembangan iteratif dengan tahapan unit testing, integration testing, field testing skema before-after, dan finalisasi sistem. Implementasi aktual pada firmware memanfaatkan sensor SHT21, kendali dua kipas berbasis ambang suhu, autentikasi PIN dengan hashing SHA-256, lockout otomatis setelah tiga kegagalan, serta pengiriman log ke Google Sheets melalui antrean data. Hasil pada tahap ini dibatasi sebagai hasil implementasi kode dan hasil simulasi script test internal, sedangkan metrik lapangan kuantitatif tetap dinyatakan sebagai placeholder rencana uji proposal. Keterbatasan sistem juga dinyatakan eksplisit, yaitu belum adanya reed switch fisik dan koneksi HTTPS yang masih menggunakan mode setInsecure.
+\end{minipage}
+
+\vspace{0.15cm}
+\noindent\textbf{Keywords}: akses fisik, esp32, kelembapan, monitoring suhu, smart server
+
+\section{INTRODUCTION}
+Infrastruktur server membutuhkan kendali termal yang stabil karena deviasi suhu dan kelembapan dapat mempercepat degradasi perangkat. Pedoman lingkungan data center dan studi reliabilitas menegaskan pentingnya kontrol termal berbasis pengukuran kontinu \citep{ashrae2021,shahi2022,cho2023,qu2024}. Pendekatan pendinginan rak tingkat lanjut juga telah berkembang dari strategi rule-based menuju optimasi cerdas untuk efisiensi energi dan kestabilan operasional \citep{wan2021,wan2023}.
+
+Di sisi keamanan, akses fisik ke rak server wajib dikendalikan agar prinsip confidentiality, integrity, dan availability tetap terjaga \citep{stallings2017}. Implementasi sistem berbasis API juga perlu memperhatikan keamanan komunikasi data \citep{yusof2023,rfc8446_2018}. Dalam konteks penelitian ini, kebutuhan monitoring dan kontrol tidak hanya menampilkan data realtime, tetapi juga harus menyediakan jejak audit akses yang dapat ditelusuri.
+
+Riset ini mempertahankan konteks proposal Rev 2 dengan metode pengembangan iteratif dan orientasi client-server \citep{andriana2023,priyadi2022}. Kontribusi naskah revisi adalah menyelaraskan narasi jurnal dengan implementasi kode aktual, mengikuti pola penulisan Arie+Yuniarta, serta menjaga alur pengujian sesuai proposal tanpa menambah skenario di luar rancangan uji yang sudah ditetapkan.
+
+\section{METHOD}
+\subsection*{A. Arsitektur Sistem}
+Platform utama sistem adalah ESP32 sebagai pengendali IoT dengan dukungan Wi-Fi terintegrasi dan resource komputasi yang memadai untuk orkestrasi sensor, autentikasi, web service, serta logging cloud \citep{espressif2024}. Sensor suhu-kelembapan menggunakan SHT21 sesuai datasheet pabrikan \citep{sensirion2022}. Komponen antarmuka dan aktuator merujuk pada spesifikasi modul yang digunakan dalam proposal, meliputi keypad dan LCD \citep{indomaker2022,sunfounder2017,dfrobot2025}, relay 4 channel \citep{lazada2021}, kipas DC \citep{ubuy2026}, dan solenoid door lock \citep{multicomp2019,digiware2020}. Rujukan pasar komponen HTU21D yang sekelas digunakan pada proposal sebagai pembanding implementasi sensor I2C \citep{duaitek2026}.
+
+\subsection*{B. Implementasi Firmware dan Layanan Jaringan}
+Implementasi firmware memakai Arduino framework pada PlatformIO dengan dukungan C++23 serta stack kriptografi Mbed TLS dari Espressif \citep{espressif2025b,espressif2025a}. Komunikasi endpoint lokal mengikuti semantik HTTP modern \citep{rfc9110_2022}. Konteks jaringan nirkabel mengacu pada standar IEEE 802.11 dan praktik monitoring nirkabel berbiaya rendah pada lingkungan indoor \citep{ieee80211_2024,gul2024}.
+
+Kontrak endpoint yang aktif pada implementasi saat ini:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \texttt{GET /api/state}
+\item \texttt{GET/POST /api/config/thermal}
+\item \texttt{GET/POST /api/config/security}
+\item \texttt{GET/POST /api/users}
+\item \texttt{DELETE /api/users/\{userId\}}
+\item \texttt{POST /api/send}
+\item \texttt{GET /api/wifi/scan}
+\item \texttt{POST /api/wifi/connect}
+\end{enumerate}
+
+Payload logging cloud dibagi dua sheet, yaitu \texttt{telemetry\_logs} (suhu, kelembapan, status fan, RSSI, ambang) dan \texttt{access\_logs} (identitas user, result, reason, failed count, lockout, status pintu).
+
+\subsection*{C. Parameter Kendali yang Dikunci}
+Berdasarkan kode firmware, parameter default yang dipakai pada revisi jurnal ini adalah:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \texttt{warnThresholdC = 27.0}
+\item \texttt{stage2ThresholdC = 28.0}
+\item \texttt{maxFailedAttempts = 3}
+\item \texttt{keypadLockoutSec = 120}
+\item \texttt{solenoidUnlockSec = 10}
+\end{enumerate}
+
+Logika fan yang digunakan:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \texttt{warning = valid \&\& temperature > warnThresholdC}
+\item \texttt{fan2On = valid \&\& temperature >= stage2ThresholdC}
+\item \texttt{fan1On = fan1BaselineOn || warning || fan2On}
+\end{enumerate}
+
+\subsection*{D. Alur Pengujian Sesuai Proposal}
+Alur pengujian tidak diubah dari proposal. Tahapan dilakukan iteratif sebagai berikut:
+\begin{enumerate}[leftmargin=*,nosep]
+\item Unit testing: validasi fungsi tiap modul (sensor, kontrol fan, autentikasi, endpoint, logging).
+\item Integration testing: validasi aliran data antarmodul dari input sampai cloud logging.
+\item Field testing (before-after): baseline operasional manual 1 minggu, dilanjutkan pengamatan pasca implementasi 2 minggu.
+\item Finalization: evaluasi hasil dan penyempurnaan konfigurasi sistem.
+\end{enumerate}
+
+Desain field testing proposal memakai quasi-experimental before-after dengan variabel kuantitatif: suhu, kelembapan, response time, access count per hari, MAE, uptime, dan error rate. Data kualitatif mencakup feedback administrator, catatan observasi, dan isu operasional.
+
+\section{RESULT AND DISCUSSION}
+\subsection*{A. Hasil Implementasi Kode}
+Hasil implementasi kode menunjukkan bahwa kontrol termal, kontrol akses, dan logging sudah terintegrasi dalam satu siklus runtime. Modul termal menerapkan ambang bertingkat pada 27.0\,$^\circ$C dan 28.0\,$^\circ$C. Modul akses menerapkan hashing PIN, pencatatan event grant/deny, serta lockout otomatis 120 detik setelah tiga kegagalan berturut-turut. Modul jaringan menyiapkan antrean telemetry dan access agar pengiriman log tetap berjalan saat koneksi tidak stabil.
+
+Temuan ini sejalan dengan kebutuhan operasional pendinginan dan efisiensi motor fan pada sistem thermal management berskala praktis \citep{sen2025}. Secara desain, pendekatan ini konsisten dengan tujuan proposal untuk mengurangi risiko hotspot rak sekaligus menambah akuntabilitas akses.
+
+\subsection*{B. Hasil Pengujian Tahap Unit dan Integrasi}
+Untuk tahap saat ini, bukti pengujian yang tersedia adalah script test internal pada folder \texttt{tests/}. Skenario yang digunakan tetap mengikuti kebutuhan proposal: telemetry (normal, warning, alarm, fan off, RSSI baik/buruk, door state) dan access (granted, denied, lockout, unknown user). Hasil pada tahap ini diklasifikasikan sebagai \textbf{hasil simulasi script test}, bukan hasil lapangan final.
+
+\begin{table}[h]
+\centering
+\caption{Status ketersediaan bukti uji sesuai proposal}
+\label{tab:uijstatus}
+\begin{tabularx}{0.98\columnwidth}{p{0.28\columnwidth}p{0.24\columnwidth}Y}
+\toprule
+\textbf{Tahap Uji} & \textbf{Status Bukti} & \textbf{Keterangan} \\\midrule
+Unit testing & Tersedia & Bukti script modular di folder \texttt{tests/}. \\
+Integration testing & Tersedia & Endpoint + antrean logging + payload cloud diuji terintegrasi. \\
+Field testing before-after & Placeholder & Menunggu pelaksanaan baseline 1 minggu dan pasca implementasi 2 minggu. \\
+Finalization & Placeholder & Dilakukan setelah data lapangan terkumpul. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection*{C. Rencana Analisis Field Testing (Placeholder Proposal)}
+Agar konsisten dengan proposal, tabel metrik lapangan disiapkan sebagai template pengisian setelah observasi berjalan.
+
+\begin{table}[h]
+\centering
+\caption{Template metrik before-after sesuai proposal}
+\label{tab:fieldtemplate}
+\begin{tabularx}{0.98\columnwidth}{p{0.30\columnwidth}p{0.20\columnwidth}Y}
+\toprule
+\textbf{Metrik} & \textbf{Sumber Data} & \textbf{Status Saat Ini} \\\midrule
+Suhu rata-rata rak & telemetry\_logs & Placeholder (belum final) \\
+Kelembapan rata-rata rak & telemetry\_logs & Placeholder (belum final) \\
+Response time unlock & access\_logs + observasi & Placeholder (belum final) \\
+Access count per hari & access\_logs & Placeholder (belum final) \\
+MAE pembacaan sensor & komparasi alat acuan & Placeholder (belum final) \\
+Uptime sistem & log operasi perangkat & Placeholder (belum final) \\
+Error rate komunikasi & log kirim cloud & Placeholder (belum final) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection*{D. Keterbatasan Implementasi}
+Keterbatasan yang harus dinyatakan pada revisi ini adalah: (1) status pintu masih diturunkan dari event solenoid karena belum ada reed switch, (2) koneksi HTTPS klien masih menggunakan \texttt{setInsecure}, dan (3) data lapangan kuantitatif sebelum-sesudah belum lengkap. Dengan demikian, kesimpulan performa lapangan penuh belum dapat diklaim pada naskah ini.
+
+\section{CONCLUSION}
+Revisi jurnal ini telah disusun ulang mengikuti pola Arie+Yuniarta, menggunakan referensi yang sama dengan Draft Proposal Rev 2, dan menjaga alur pengujian tetap sesuai proposal (unit, integrasi, field before-after, finalisasi). Narasi teknis sudah disinkronkan ke implementasi kode aktual untuk logika termal, keamanan akses, endpoint REST, serta mekanisme logging cloud.
+
+Pada tahap saat ini, hasil yang sah adalah hasil implementasi kode dan hasil simulasi script test internal. Data field testing before-after tetap dinyatakan sebagai placeholder proposal dan menjadi pekerjaan lanjutan sebelum penyimpulan performa operasional penuh.
+
+\bibliographystyle{plainnat}
+\bibliography{rev2_references}
+
+\end{document}
+

@@ -1,0 +1,172 @@
+\begin{thebibliography}{27}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Andriana and Priyadi(2023)]{andriana2023}
+M.~Andriana and P.~Priyadi.
+\newblock Implementasi metode r\&d pada sistem penggajian guru honorer.
+\newblock \emph{Jurnal Akuntansi dan Bisnis}, 3\penalty0 (1):\penalty0 20--27,
+  2023.
+
+\bibitem[{ASHRAE}(2021)]{ashrae2021}
+{ASHRAE}.
+\newblock \emph{Thermal Guidelines for Data Processing Environments - Third
+  Edition}.
+\newblock American Society of Heating, Refrigerating and Air-Conditioning
+  Engineers, 2021.
+
+\bibitem[Cho and Lim(2023)]{cho2023}
+J.~Cho and S.~Lim.
+\newblock Balanced comparative assessment of thermal performance and energy
+  efficiency for three cooling solutions in data centers.
+\newblock \emph{Energy}, 285:\penalty0 129370, 2023.
+
+\bibitem[{Committee of the IEEE Computer Society}(2024)]{ieee80211_2024}
+{Committee of the IEEE Computer Society}.
+\newblock Ieee 802.11-2024 standard for information technology.
+\newblock IEEE Standard, 2024.
+
+\bibitem[{DFRobot}(2025)]{dfrobot2025}
+{DFRobot}.
+\newblock Dfr0154 lcd 20x4 i2c module specification.
+\newblock Retrieved from \url{https://wiki.dfrobot.com/}, 2025.
+
+\bibitem[{Digiware Store}(2020)]{digiware2020}
+{Digiware Store}.
+\newblock Solenoid door lock 12v dc.
+\newblock Retrieved from
+  \url{https://digiwarestore.com/id/other-appliances/solenoid-door-lock-12v-dc-267059.html},
+  2020.
+
+\bibitem[{Duaitek}(2026)]{duaitek2026}
+{Duaitek}.
+\newblock Sensor digital de humedad temperatura htu21d i2c.
+\newblock Retrieved from
+  \url{https://www.duaitek.com.ar/MLA-803920587-sensor-digital-de-humedad-temperatura-htu21d-i2c-desarrollo-_JM},
+  2026.
+
+\bibitem[{Espressif Systems}(2024)]{espressif2024}
+{Espressif Systems}.
+\newblock Esp32 series datasheet v5.2.
+\newblock Technical report, Espressif Systems Inc., Shanghai, 2024.
+
+\bibitem[{Espressif Systems}(2025{\natexlab{a}})]{espressif2025a}
+{Espressif Systems}.
+\newblock Mbed tls api documentation.
+\newblock Retrieved from \url{https://docs.espressif.com/}, 2025{\natexlab{a}}.
+
+\bibitem[{Espressif Systems}(2025{\natexlab{b}})]{espressif2025b}
+{Espressif Systems}.
+\newblock Esp-idf programming guide - c++23 support.
+\newblock Retrieved from \url{https://docs.espressif.com/}, 2025{\natexlab{b}}.
+
+\bibitem[Fielding et~al.(2022)Fielding, Nottingham, and Mogul]{rfc9110_2022}
+R.~T. Fielding, M.~Nottingham, and J.~C. Mogul.
+\newblock Hypertext transfer protocol semantics and content.
+\newblock Technical Report RFC 9110, IETF, 2022.
+
+\bibitem[Gul and Eroglu(2024)]{gul2024}
+F.~Gul and H.~Eroglu.
+\newblock Low-cost iot mesh network for real-time indoor air quality
+  monitoring.
+\newblock In \emph{Proceedings of the 9th International Conference on
+  Communication and Electronics Systems (ICCES 2024)}, 2024.
+
+\bibitem[{Indomaker}(2022)]{indomaker2022}
+{Indomaker}.
+\newblock Tutorial keypad 4x4 dan lcd 1602 menggunakan arduino uno.
+\newblock Retrieved from
+  \url{https://indomaker.com/blog/tutorial-keypad-4x4-dan-lcd-1602-menggunakan-arduino-uno/},
+  2022.
+
+\bibitem[{Lazada Indonesia}(2021)]{lazada2021}
+{Lazada Indonesia}.
+\newblock Relay module 5v 4 channel.
+\newblock Retrieved from
+  \url{https://www.lazada.co.id/products/relay-module-5v-4-channel-4ch-4-ch-untuk-arduino-modul-relay-5v-5-v-i4401698915.html},
+  2021.
+
+\bibitem[{Multicomp Pro}(2019)]{multicomp2019}
+{Multicomp Pro}.
+\newblock Mp001162 solenoid door lock datasheet.
+\newblock Technical report, Heilind Electronics, 2019.
+
+\bibitem[Priyadi and Santoso(2022)]{priyadi2022}
+P.~Priyadi and B.~Santoso.
+\newblock Sistem informasi administrasi pembayaran sekolah terintegrasi barcode
+  reader dengan metode berorientasi objek berbasis client server.
+\newblock \emph{Elkom: Jurnal Elektronika dan Komputer}, 15\penalty0
+  (2):\penalty0 228--233, 2022.
+
+\bibitem[Qu et~al.(2024)Qu, Li, Liu, and Wang]{qu2024}
+J.~Qu, Z.~Li, H.~Liu, and X.~Wang.
+\newblock Iot-based real-time temperature monitoring in critical systems: A
+  review.
+\newblock \emph{IgMin Research - A BioMed \& Engineering Open Access Journal},
+  2024.
+
+\bibitem[Rescorla(2018)]{rfc8446_2018}
+E.~Rescorla.
+\newblock The transport layer security (tls) protocol version 1.3.
+\newblock Technical Report RFC 8446, IETF, 2018.
+
+\bibitem[Sen and Mutluer(2025)]{sen2025}
+A.~Sen and B.~Mutluer.
+\newblock Brushless dc motor efficiency in thermal management applications.
+\newblock \emph{Journal of Embedded Systems}, 15\penalty0 (3):\penalty0
+  234--245, 2025.
+
+\bibitem[{Sensirion AG}(2022)]{sensirion2022}
+{Sensirion AG}.
+\newblock Sht21 humidity and temperature sensor datasheet.
+\newblock Technical report, Sensirion AG, Zurich, 2022.
+
+\bibitem[Shahi et~al.(2022)Shahi, Kumar, and Patel]{shahi2022}
+R.~Shahi, A.~Kumar, and S.~Patel.
+\newblock Impact of thermal management on server lifetime reliability.
+\newblock \emph{IEEE Transactions on Industrial Electronics}, 69\penalty0
+  (8):\penalty0 7851--7862, 2022.
+
+\bibitem[Stallings(2017)]{stallings2017}
+W.~Stallings.
+\newblock \emph{Cryptography and Network Security: Principles and Practice}.
+\newblock Pearson, Boston, 7th edition, 2017.
+
+\bibitem[{Sunfounder}(2017)]{sunfounder2017}
+{Sunfounder}.
+\newblock I2c lcd2004 module.
+\newblock Retrieved from
+  \url{https://www.sunfounder.com/products/i2c-lcd2004-module}, 2017.
+
+\bibitem[{Ubuy Indonesia}(2026)]{ubuy2026}
+{Ubuy Indonesia}.
+\newblock 140mm x 38mm 12v dc brushless cooling fan.
+\newblock Retrieved from
+  \url{https://www.ubuy.co.id/id/product/8ENMBI4LC-140mm-fan-140mm-x-38mm-6pin-12v-dc-brushless-computer-case-cooling-fan-7000rpm},
+  2026.
+
+\bibitem[Wan et~al.(2021)Wan, Zhou, and Gui]{wan2021}
+J.~Wan, J.~Zhou, and X.~Gui.
+\newblock Intelligent rack-level cooling management in data centers with active
+  ventilation tiles: A deep reinforcement learning approach.
+\newblock \emph{IEEE Intelligent Systems}, 36\penalty0 (6):\penalty0 42--52,
+  2021.
+
+\bibitem[Wan et~al.(2023)Wan, Duan, Gui, et~al.]{wan2023}
+J.~Wan, Y.~Duan, X.~Gui, et~al.
+\newblock Safecool: Safe and energy-efficient cooling management in data
+  centers with model-based reinforcement learning.
+\newblock \emph{IEEE Transactions on Emerging Topics in Computational
+  Intelligence}, 7\penalty0 (6):\penalty0 1621--1635, 2023.
+
+\bibitem[Yusof et~al.(2023)Yusof, Man, Wan~Hamzah, et~al.]{yusof2023}
+M.~K. Yusof, M.~Man, W.~M. A.~F. Wan~Hamzah, et~al.
+\newblock A secure model based on symmetric encryption for rest api in data
+  integration.
+\newblock In \emph{27th International Computer Science and Engineering
+  Conference (ICSEC 2023)}, 2023.
+
+\end{thebibliography}

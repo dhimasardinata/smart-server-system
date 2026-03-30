@@ -3,6 +3,26 @@
 #include <HTTPClient.h>
 #include <algorithm>
 
+namespace {
+const char* wifiStateName(WiFiManager::State state) {
+  switch (state) {
+    case WiFiManager::State::Idle:
+      return "idle";
+    case WiFiManager::State::Scanning:
+      return "scanning";
+    case WiFiManager::State::Connecting:
+      return "connecting";
+    case WiFiManager::State::Verifying:
+      return "verifying";
+    case WiFiManager::State::Connected:
+      return "connected";
+    case WiFiManager::State::ApMode:
+      return "ap";
+  }
+  return "unknown";
+}
+}  // namespace
+
 void WiFiManager::begin(ConfigManager* config) {
   _config = config;
   WiFi.mode(WIFI_STA);
@@ -33,9 +53,9 @@ void WiFiManager::update() {
       break;
 
     case State::Connecting:
+      if (_keepApAlive) _dnsServer.processNextRequest();
       if (WiFi.status() == WL_CONNECTED) {
-        _state = State::Verifying;
-        _lastAction = now;
+        onConnected();
       } else if (now - _lastAction > CONNECT_TIMEOUT) {
         Serial.println(F("WiFi: Connection timeout"));
         tryNextNetwork();
@@ -43,19 +63,8 @@ void WiFiManager::update() {
       break;
 
     case State::Verifying: {
-      static unsigned long lastVerifyAttempt = 0;
-      if (now - lastVerifyAttempt > 2000) {
-        lastVerifyAttempt = now;
-        if (verifyInternet()) {
-          onConnected();
-          break;
-        }
-      }
-      
-      if (now - _lastAction > VERIFY_TIMEOUT) {
-        Serial.println(F("WiFi: Internet verification failed"));
-        tryNextNetwork();
-      }
+      if (_keepApAlive) _dnsServer.processNextRequest();
+      onConnected();
       break;
     }
 
@@ -77,6 +86,7 @@ void WiFiManager::update() {
 
 void WiFiManager::startScan() {
   Serial.println(F("WiFi: Starting scan..."));
+  WiFi.mode(_keepApAlive ? WIFI_AP_STA : WIFI_STA);
   _state = State::Scanning;
   _lastAction = millis();
   WiFi.scanNetworks(true);
@@ -131,6 +141,7 @@ void WiFiManager::tryNextNetwork() {
   const auto& net = _matchedNetworks[_currentNetIndex];
   Serial.printf("WiFi: Connecting to %s...\n", net.ssid.c_str());
 
+  WiFi.mode(_keepApAlive ? WIFI_AP_STA : WIFI_STA);
   WiFi.disconnect();
   delay(100);
   WiFi.begin(net.ssid.c_str(), net.password.c_str());
@@ -151,6 +162,13 @@ bool WiFiManager::verifyInternet() {
 
 void WiFiManager::onConnected() {
   _state = State::Connected;
+  if (_keepApAlive) {
+    _dnsServer.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    _keepApAlive = false;
+    Serial.println(F("WiFi: AP fallback stopped, local network access only"));
+  }
   Serial.printf("WiFi: Connected to %s, IP: %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
 }
@@ -161,20 +179,100 @@ void WiFiManager::onAllFailed() {
 }
 
 void WiFiManager::startApMode() {
-  WiFi.disconnect();
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  delay(100);
+  Serial.println(F("WiFi: Preparing AP mode"));
+  _keepApAlive = false;
+  _dnsServer.stop();
 
-  _dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+  WiFi.mode(WIFI_MODE_NULL);
+  delay(50);
+  WiFi.setSleep(false);
+  WiFi.mode(WIFI_AP);
+  delay(50);
+
+  bool apStarted = false;
+  if (AP_PASS[0] == '\0') {
+    Serial.println(F("WiFi: Starting open AP"));
+    apStarted = WiFi.softAP(AP_SSID);
+  } else {
+    Serial.println(F("WiFi: Starting secured AP"));
+    apStarted = WiFi.softAP(AP_SSID, AP_PASS);
+  }
+
+  if (!apStarted) {
+    Serial.println(F("WiFi: softAP start failed"));
+    _state = State::Idle;
+    _lastAction = millis();
+    return;
+  }
+
+  delay(150);
+  const IPAddress apIp = WiFi.softAPIP();
+  Serial.printf("WiFi: AP IP ready = %s\n", apIp.toString().c_str());
+
+  _dnsServer.start(DNS_PORT, "*", apIp);
   _state = State::ApMode;
+  _lastAction = millis();
 
   Serial.printf("WiFi: AP mode started - SSID: %s, IP: %s\n", AP_SSID,
-                WiFi.softAPIP().toString().c_str());
+                apIp.toString().c_str());
 }
 
 IPAddress WiFiManager::getIP() const {
   return (_state == State::ApMode) ? WiFi.softAPIP() : WiFi.localIP();
+}
+
+bool WiFiManager::connectTo(const String& ssid, const String& password) {
+  if (ssid.length() == 0) return false;
+
+  _matchedNetworks.clear();
+  _matchedNetworks.push_back({ssid, password, 0});
+  _currentNetIndex = 0;
+  _keepApAlive = (_state == State::ApMode);
+  _lastAction = millis();
+
+  Serial.printf("WiFi: Manual connect requested for %s\n", ssid.c_str());
+  tryNextNetwork();
+  return true;
+}
+
+const char* WiFiManager::stateName() const { return wifiStateName(_state); }
+
+std::vector<WiFiManager::ScannedNetwork> WiFiManager::scanNow() {
+  const bool keepAp = (_state == State::ApMode) || _keepApAlive;
+  if (keepAp) {
+    WiFi.mode(WIFI_AP_STA);
+    delay(50);
+  }
+
+  std::vector<ScannedNetwork> results;
+  const int n = WiFi.scanNetworks(false, true);
+  if (n > 0) {
+    results.reserve(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      ScannedNetwork sn;
+      sn.ssid = WiFi.SSID(i);
+      sn.rssi = WiFi.RSSI(i);
+      sn.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+      sn.saved = false;
+
+      for (const auto& saved : _config->data.wifiNetworks) {
+        if (saved.enabled && saved.ssid == sn.ssid) {
+          sn.saved = true;
+          break;
+        }
+      }
+      results.push_back(sn);
+    }
+  }
+
+  WiFi.scanDelete();
+  _allScannedNetworks = results;
+
+  if (keepAp) {
+    WiFi.mode(WIFI_AP_STA);
+  }
+
+  return _allScannedNetworks;
 }
 
 std::vector<WiFiManager::ScannedNetwork> WiFiManager::getScannedNetworks()

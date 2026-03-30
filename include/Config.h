@@ -67,6 +67,7 @@ class ConfigManager {
   [[nodiscard]] bool begin();
   [[nodiscard]] bool load();
   bool save();
+  bool formatFileSystem();
 
   bool addWiFi(const String& ssid, const String& password);
   bool removeWiFi(const String& ssid);

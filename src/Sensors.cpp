@@ -1,17 +1,66 @@
 #include "Sensors.h"
+
 #include <Wire.h>
 
-SHT21Sensor::SHT21Sensor() : _sht(SHT2x_SENSOR, HUMD_12BIT_TEMP_14BIT) {}
+namespace {
+constexpr uint8_t SHT21_ADDRESS = 0x40;
+
+bool probeI2cAddress(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission(true) == 0;
+}
+
+void logI2cScan() {
+  Serial.println(F("I2C scan result:"));
+
+  uint8_t found = 0;
+  for (uint8_t address = 1; address < 127; ++address) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission(true) == 0) {
+      Serial.printf(" - device at 0x%02X\n", address);
+      ++found;
+    }
+    delay(1);
+  }
+
+  if (found == 0) {
+    Serial.println(F(" - no I2C devices found"));
+  }
+}
+
+const char* sensorTypeName(SHTSensor::SHTSensorType type) {
+  switch (type) {
+    case SHTSensor::SHT2X:
+      return "SHT2x";
+    case SHTSensor::SHT3X:
+      return "SHT3x";
+    default:
+      return "unknown";
+  }
+}
+}  // namespace
+
+SHT21Sensor::SHT21Sensor() : _sht(SHTSensor::SHT2X) {}
 
 bool SHT21Sensor::begin() {
-  if (!_sht.begin(SDA, SCL)) {
-    Serial.println(F("SHT21 not responding"));
+  delay(20);
+
+  if (!probeI2cAddress(SHT21_ADDRESS)) {
+    Serial.println(F("SHT21 not detected at I2C address 0x40"));
+    logI2cScan();
     return false;
   }
 
-  Serial.println(F("SHT21 initialized (HTU2xD_SHT2x_Si70xx library)"));
-  Serial.print(F("Firmware version: 0x"));
-  Serial.println(_sht.readFirmwareVersion(), HEX);
+  if (!_sht.init(Wire)) {
+    Serial.println(F("SHT21 init failed (arduino-sht)"));
+    logI2cScan();
+    return false;
+  }
+
+  _sht.setAccuracy(SHTSensor::SHT_ACCURACY_HIGH);
+
+  Serial.print(F("SHT21 initialized via arduino-sht, type="));
+  Serial.println(sensorTypeName(_sht.mSensorType));
 
   _ready = true;
   return true;
@@ -25,17 +74,14 @@ SensorData SHT21Sensor::read() {
     return data;
   }
 
-  float temperature = _sht.readTemperature();
-  float humidity = _sht.readHumidity();
-
-  if (temperature == HTU2XD_SHT2X_SI70XX_ERROR || humidity == HTU2XD_SHT2X_SI70XX_ERROR) {
+  if (!_sht.readSample()) {
     data.valid = false;
-    Serial.println(F("SHT21 read failed (CRC error)"));
+    Serial.println(F("SHT21 read failed"));
     return data;
   }
 
-  data.temperature = temperature;
-  data.humidity = _sht.getCompensatedHumidity(temperature);
+  data.temperature = _sht.getTemperature();
+  data.humidity = _sht.getHumidity();
   data.valid = true;
 
   return data;

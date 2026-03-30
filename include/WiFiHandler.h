@@ -31,6 +31,8 @@ class WiFiManager {
   [[nodiscard]] IPAddress getIP() const;
 
   void startApMode();
+  bool connectTo(const String& ssid, const String& password);
+  [[nodiscard]] const char* stateName() const;
 
   struct ScannedNetwork {
     String ssid;
@@ -38,6 +40,7 @@ class WiFiManager {
     bool open;
     bool saved;
   };
+  std::vector<ScannedNetwork> scanNow();
   [[nodiscard]] std::vector<ScannedNetwork> getScannedNetworks() const;
 
  private:
@@ -47,6 +50,7 @@ class WiFiManager {
   unsigned long _lastAction = 0;
   size_t _currentNetIndex = 0;
   bool _scanComplete = false;
+  bool _keepApAlive = false;
 
   struct MatchedNetwork {
     String ssid;

@@ -153,10 +153,10 @@ void Display::showMainScreen() {
 
   char row3[24];
   if (_lockoutActive) {
-    snprintf(row3, sizeof(row3), "D:%s LCK %lus",
+    snprintf(row3, sizeof(row3), "D:%.8s LCK %lus",
              _doorState.c_str(), static_cast<unsigned long>(_lockoutRemainSec));
   } else {
-    snprintf(row3, sizeof(row3), "D:%-8s %s",
+    snprintf(row3, sizeof(row3), "D:%-8.8s %.12s",
              _doorState.c_str(), _accessMessage.c_str());
   }
   if (strlen(row3) > _cols) row3[_cols] = '\0';
@@ -180,7 +180,7 @@ void Display::showPinEntry(uint8_t pinLen, bool lockout, uint32_t lockSec) {
   for (uint8_t i = 0; i < pinLen && offset < 14; ++i) pinStr[offset++] = '*';
   pinStr[offset] = '\0';
   printRow(2, pinStr);
-  printRow(3, "[*] Batal  [#] OK");
+  printRow(3, "D=Hps *=Btl #=OK");
 }
 
 void Display::showUnlockOk(const String& name) {
@@ -257,7 +257,7 @@ void Display::showChangePin(const String& userId, uint8_t step, uint8_t len) {
     printRow(2, buf);
   }
 
-  printRow(3, "[*] Batal  [#] OK");
+  printRow(3, "D=Hps *=Btl #=OK");
 }
 
 void Display::showAddUser(const String& autoId, uint8_t pinLen) {
@@ -275,7 +275,7 @@ void Display::showAddUser(const String& autoId, uint8_t pinLen) {
   pinRow[offset] = '\0';
   printRow(2, pinRow);
 
-  printRow(3, "[*] Batal  [#] Simpan");
+  printRow(3, "D=Hps *=Btl #=Sav");
 }
 
 void Display::showConfirmDelete(const String& userId) {

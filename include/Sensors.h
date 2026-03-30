@@ -3,7 +3,7 @@
 #include "PinMap.h"
 
 #include <Arduino.h>
-#include <HTU2xD_SHT2x_Si70xx.h>
+#include <SHTSensor.h>
 
 struct SensorData {
   float temperature;
@@ -17,10 +17,10 @@ class SHT21Sensor {
 
   [[nodiscard]] bool begin();
   [[nodiscard]] SensorData read();
-  [[nodiscard]] bool isReady() const { return _ready; }
+ [[nodiscard]] bool isReady() const { return _ready; }
 
  private:
-  HTU2xD_SHT2x_SI70xx _sht;
+  SHTSensor _sht;
   bool _ready = false;
 };
 

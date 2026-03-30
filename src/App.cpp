@@ -6,32 +6,61 @@
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 #include <Wire.h>
+#include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_task_wdt.h>
 
 namespace {
 constexpr const char* MDNS_HOSTNAME = "monitor-server";
+
+uint32_t relayInactiveLevel(bool activeLow) { return activeLow ? 1U : 0U; }
+
+uint32_t relayOutputLevel(bool activeLow, bool on) {
+  return activeLow ? (on ? 0U : 1U) : (on ? 1U : 0U);
+}
+
+bool relayActiveLow(uint8_t pin) {
+  if (pin == Pins::RELAY_SOLENOID) return Pins::SOLENOID_ACTIVE_LOW;
+  if (pin == Pins::RELAY_ALERT) return Pins::ALERT_ACTIVE_LOW;
+  return Pins::RELAY_ACTIVE_LOW;
+}
+
+void prepareRelayPin(uint8_t pin) {
+  const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
+  const uint32_t inactiveLevel = relayInactiveLevel(relayActiveLow(pin));
+  gpio_reset_pin(gpio);
+  gpio_set_level(gpio, inactiveLevel);
+  gpio_set_direction(gpio, GPIO_MODE_OUTPUT);
+}
 }
 
 App::App() : _display(Pins::I2C_ADDR_LCD, Pins::LCD_COLS, Pins::LCD_ROWS) {}
 
 void App::setRelay(uint8_t pin, bool on) {
-  const uint8_t level =
-      Pins::RELAY_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW);
-  digitalWrite(pin, level);
+  const uint32_t level = relayOutputLevel(relayActiveLow(pin), on);
+  gpio_set_level(static_cast<gpio_num_t>(pin), level);
 }
 
 void App::setupRelays() {
-  pinMode(Pins::RELAY_FAN1, OUTPUT);
-  pinMode(Pins::RELAY_FAN2, OUTPUT);
-  pinMode(Pins::RELAY_SOLENOID, OUTPUT);
+  prepareRelayPin(Pins::RELAY_FAN1);
+  prepareRelayPin(Pins::RELAY_FAN2);
+  prepareRelayPin(Pins::RELAY_SOLENOID);
+  prepareRelayPin(Pins::RELAY_ALERT);
   _fan1On = false;
   _fan2On = false;
   _solenoidOn = false;
   _solenoidUnlockUntilMs = 0;
+  _alertOn = false;
+  _alertState = AlertState::Idle;
+  _thermalTier = 0;
+  _alertUntilMs = 0;
+  _alertQueueHead = 0;
+  _alertQueueTail = 0;
+  _alertQueueCount = 0;
   setRelay(Pins::RELAY_FAN1, false);
   setRelay(Pins::RELAY_FAN2, false);
   setRelay(Pins::RELAY_SOLENOID, false);
+  setRelay(Pins::RELAY_ALERT, false);
 }
 
 void App::setup() {
@@ -68,6 +97,8 @@ void App::setup() {
 }
 
 void App::setupOTA() {
+  if (_otaReady) return;
+
   if (MDNS.begin(MDNS_HOSTNAME)) {
     Serial.printf("mDNS: %s.local\n", MDNS_HOSTNAME);
   }
@@ -83,6 +114,7 @@ void App::setupOTA() {
     Serial.printf("OTA error[%u]\n", error);
   });
   ArduinoOTA.begin();
+  _otaReady = true;
 }
 
 void App::updateThermalAndFans(const SensorData& data) {
@@ -92,6 +124,7 @@ void App::updateThermalAndFans(const SensorData& data) {
 
   setRelay(Pins::RELAY_FAN1, _fan1On);
   setRelay(Pins::RELAY_FAN2, _fan2On);
+  updateThermalAlertState(_warning, _fan2On);
 }
 
 void App::requestUnlock() {
@@ -109,8 +142,152 @@ void App::updateSolenoid() {
   }
 }
 
+void App::setAlertRelay(bool on) {
+  _alertOn = on;
+  setRelay(Pins::RELAY_ALERT, on);
+}
+
+bool App::hasContinuousThermalAlert() const { return _thermalTier > 0; }
+
+uint16_t App::alertDurationMs(AlertState state) const {
+  switch (state) {
+    case AlertState::AccessDenied:
+      return 2000;
+    default:
+      return 0;
+  }
+}
+
+const char* App::alertStateName() const {
+  switch (_alertState) {
+    case AlertState::AccessGranted:
+      return "ACCESS_GRANTED";
+    case AlertState::AccessDenied:
+      return "ACCESS_DENIED";
+    case AlertState::Lockout:
+      return "LOCKOUT";
+    case AlertState::ThermalWarning:
+      return "THERMAL_WARNING";
+    case AlertState::ThermalCritical:
+      return "THERMAL_CRITICAL";
+    case AlertState::Idle:
+    default:
+      return "IDLE";
+  }
+}
+
+void App::enqueueAlert(AlertState state) {
+  if (state == AlertState::Idle || hasContinuousThermalAlert()) return;
+
+  if (_alertQueueCount >= ALERT_QUEUE_SIZE) {
+    _alertQueueHead = (_alertQueueHead + 1) % ALERT_QUEUE_SIZE;
+    --_alertQueueCount;
+  }
+
+  _alertQueue[_alertQueueTail] = state;
+  _alertQueueTail = (_alertQueueTail + 1) % ALERT_QUEUE_SIZE;
+  ++_alertQueueCount;
+}
+
+void App::clearQueuedAlerts(bool stopCurrent) {
+  _alertQueueHead = 0;
+  _alertQueueTail = 0;
+  _alertQueueCount = 0;
+
+  if (stopCurrent) stopAlert();
+}
+
+bool App::dequeueAlert(AlertState& state) {
+  if (_alertQueueCount == 0) return false;
+  state = _alertQueue[_alertQueueHead];
+  _alertQueueHead = (_alertQueueHead + 1) % ALERT_QUEUE_SIZE;
+  --_alertQueueCount;
+  return true;
+}
+
+void App::startAlert(AlertState state) {
+  if (hasContinuousThermalAlert()) return;
+  const uint16_t durationMs = alertDurationMs(state);
+  if (durationMs == 0) return;
+
+  _alertState = state;
+  _alertUntilMs = millis() + durationMs;
+  setAlertRelay(true);
+}
+
+void App::stopAlert() {
+  _alertUntilMs = 0;
+  _alertState = AlertState::Idle;
+  setAlertRelay(false);
+}
+
+void App::updateThermalAlertState(bool warning, bool critical) {
+  const uint8_t newTier = critical ? 2 : (warning ? 1 : 0);
+  if (newTier == _thermalTier) return;
+
+  _thermalTier = newTier;
+  if (_thermalTier > 0) {
+    _alertQueueHead = 0;
+    _alertQueueTail = 0;
+    _alertQueueCount = 0;
+    _alertUntilMs = 0;
+    _alertState = _thermalTier >= 2 ? AlertState::ThermalCritical
+                                    : AlertState::ThermalWarning;
+    setAlertRelay(true);
+    return;
+  }
+
+  stopAlert();
+}
+
+void App::handleAccessAlert(const AccessEvent& event) {
+  if (hasContinuousThermalAlert()) return;
+
+  switch (event.type) {
+    case AccessEventType::AccessGranted:
+      clearQueuedAlerts(true);
+      break;
+    case AccessEventType::AccessDenied:
+      clearQueuedAlerts(true);
+      enqueueAlert(AlertState::AccessDenied);
+      break;
+    case AccessEventType::LockoutStarted:
+      clearQueuedAlerts(true);
+    case AccessEventType::LockoutEnded:
+    default:
+      break;
+  }
+}
+
+void App::updateAlert() {
+  if (hasContinuousThermalAlert()) {
+    _alertState = _thermalTier >= 2 ? AlertState::ThermalCritical
+                                    : AlertState::ThermalWarning;
+    if (!_alertOn) setAlertRelay(true);
+    return;
+  }
+
+  if (_alertState == AlertState::ThermalWarning ||
+      _alertState == AlertState::ThermalCritical) {
+    _alertState = AlertState::Idle;
+  }
+
+  if (_alertState == AlertState::Idle) {
+    AlertState nextState;
+    if (dequeueAlert(nextState)) {
+      startAlert(nextState);
+    } else if (_alertOn) {
+      setAlertRelay(false);
+    }
+    return;
+  }
+
+  if (millis() >= _alertUntilMs) stopAlert();
+}
+
 void App::updateDisplay(const SensorData& data) {
-  _display.setWifiInfo(_wifi.isConnected(), _wifi.getIP().toString());
+  _display.setWifiInfo(_wifi.isConnected() || _wifi.isApMode(),
+                       _wifi.getIP().toString());
   _display.setTelemetry(data.temperature, data.humidity, data.valid, _fan1On,
                         _fan2On, _warning);
   _display.setSecurity(_solenoidOn ? "UNLOCKING" : "LOCKED", _access.lastMessage(),
@@ -136,6 +313,11 @@ void App::buildUserSlotMap() {
       _userSlotMap[_userSlotCount++] = static_cast<uint8_t>(i);
     }
   }
+}
+
+void App::popLastDigit(String& buffer) {
+  if (buffer.length() == 0) return;
+  buffer.remove(buffer.length() - 1);
 }
 
 void App::handleUIKey(char key) {
@@ -165,6 +347,9 @@ void App::handleUIKey(char key) {
       }
       if (key >= '0' && key <= '9' && _pinBuf.length() < 8) {
         _pinBuf += key;
+        _display.showPinEntry(_pinBuf.length());
+      } else if (key == 'D') {
+        popLastDigit(_pinBuf);
         _display.showPinEntry(_pinBuf.length());
       } else if (key == '*') {
         resetToMonitoring();
@@ -214,7 +399,7 @@ void App::handleUIKey(char key) {
         _userListAction = 0;
         buildUserSlotMap();
         _uiState = UIState::USER_LIST;
-        _display.showUserList(_config.data.users, MAX_USERS, 0);
+        _display.showUserList(_config.data.users.data(), MAX_USERS, 0);
       } else if (key == '3') {
         _autoUserId = _access.generateUserId();
         _pinBuf = "";
@@ -224,7 +409,7 @@ void App::handleUIKey(char key) {
         _userListAction = 1;
         buildUserSlotMap();
         _uiState = UIState::USER_LIST;
-        _display.showUserList(_config.data.users, MAX_USERS, 1);
+        _display.showUserList(_config.data.users.data(), MAX_USERS, 1);
       }
       break;
     }
@@ -265,6 +450,14 @@ void App::handleUIKey(char key) {
           _confirmBuf += key;
           _display.showChangePin(_selectedUserId, 1, _confirmBuf.length());
         }
+      } else if (key == 'D') {
+        if (_changePinStep == 0) {
+          popLastDigit(_pinBuf);
+          _display.showChangePin(_selectedUserId, 0, _pinBuf.length());
+        } else {
+          popLastDigit(_confirmBuf);
+          _display.showChangePin(_selectedUserId, 1, _confirmBuf.length());
+        }
       } else if (key == '#') {
         if (_changePinStep == 0 && _pinBuf.length() >= 4) {
           _changePinStep = 1;
@@ -295,6 +488,9 @@ void App::handleUIKey(char key) {
         _display.showAdminMenu();
       } else if (key >= '0' && key <= '9' && _pinBuf.length() < 8) {
         _pinBuf += key;
+        _display.showAddUser(_autoUserId, _pinBuf.length());
+      } else if (key == 'D') {
+        popLastDigit(_pinBuf);
         _display.showAddUser(_autoUserId, _pinBuf.length());
       } else if (key == '#' && _pinBuf.length() >= 4) {
         String error;
@@ -334,6 +530,14 @@ void App::loop() {
   _sensors.update();
   _access.update();
 
+  if (_wifi.isConnected()) {
+    setupOTA();
+    ArduinoOTA.handle();
+  } else if (_otaReady) {
+    MDNS.end();
+    _otaReady = false;
+  }
+
   if (_access.consumeUnlockRequest() && _uiState != UIState::UNLOCK_OK) {
     requestUnlock();
   }
@@ -342,14 +546,15 @@ void App::loop() {
   updateThermalAndFans(data);
   updateSolenoid();
 
-  if (_wifi.isConnected()) ArduinoOTA.handle();
-
   AccessEvent event;
   while (_access.popEvent(event)) {
+    handleAccessAlert(event);
     _network.logAccessEvent(event);
   }
 
-  _network.update(data, _fan1On, _fan2On, _warning, _solenoidOn);
+  updateAlert();
+  _network.update(data, _fan1On, _fan2On, _warning, _solenoidOn, _alertOn,
+                  alertStateName());
   updateDisplay(data);
 
   char key = _access.getKey();
@@ -359,7 +564,12 @@ void App::loop() {
     static unsigned long lastDisplayRefresh = 0;
     if (millis() - lastDisplayRefresh > 1000) {
       lastDisplayRefresh = millis();
-      _display.showMainScreen();
+      if (_wifi.isApMode()) {
+        const String apIp = _wifi.getIP().toString();
+        _display.showApMode(std::string_view(apIp.c_str(), apIp.length()));
+      } else {
+        _display.showMainScreen();
+      }
     }
   }
 
