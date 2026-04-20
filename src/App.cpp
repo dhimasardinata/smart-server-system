@@ -73,7 +73,7 @@ void App::setRelay(uint8_t pin, bool on) {
     *cachedState = on;
   if (pin == Pins::RELAY_FAN1 || pin == Pins::RELAY_FAN2 ||
       pin == Pins::RELAY_SOLENOID || pin == Pins::RELAY_ALERT) {
-    _display.scheduleRecovery(pin == Pins::RELAY_SOLENOID ? 40 : 25);
+    _display.scheduleRecovery(pin == Pins::RELAY_SOLENOID ? 250 : 25);
   }
 }
 
