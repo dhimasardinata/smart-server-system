@@ -8,6 +8,7 @@ constexpr uint32_t TLS_TIMEOUT_MS = 5000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 7000;
 
 String urlEncode(const String& value) {
+  // Ubah karakter aneh supaya aman dikirim.
   static const char* kHex = "0123456789ABCDEF";
   String out;
   out.reserve(value.length() * 3);
@@ -29,11 +30,14 @@ String urlEncode(const String& value) {
 }  // namespace
 
 void GoogleSheetsClient::begin(const String& scriptUrl) {
+  // Simpan alamat tujuan yang dipakai mengirim data.
   _scriptUrl = scriptUrl;
   _configured = scriptUrl.length() > 0 && scriptUrl.startsWith("https://");
 }
 
 bool GoogleSheetsClient::sendGetRequest(const String& url) {
+  // Pengiriman ini memakai cara sederhana lewat alamat yang sudah disimpan.
+  // Cara ini dipakai supaya data bisa masuk tanpa membuat jalur khusus lain.
   WiFiClientSecure client;
   client.setInsecure();
   client.setTimeout(TLS_TIMEOUT_MS);
@@ -65,6 +69,7 @@ bool GoogleSheetsClient::sendGetRequest(const String& url) {
 }
 
 bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
+  // Data pantauan diubah menjadi deretan pasangan nama dan nilai.
   if (!_configured) {
     _lastError = "Google Sheets not configured";
     return false;
@@ -89,6 +94,7 @@ bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
 }
 
 bool GoogleSheetsClient::sendAccess(const AccessLogPayload& payload) {
+  // Data akses juga dikirim dengan pola yang mirip.
   if (!_configured) {
     _lastError = "Google Sheets not configured";
     return false;

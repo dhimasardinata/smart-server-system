@@ -15,12 +15,14 @@
 #endif
 
 enum class AccessEventType : uint8_t {
+  // Kejadian saat masuk: diterima, ditolak, dikunci, dibuka lagi.
   AccessGranted,
   AccessDenied,
   LockoutStarted,
   LockoutEnded
 };
 
+// Tempat menyimpan catatan kejadian saat pintu dipakai.
 struct AccessEvent {
   AccessEventType type = AccessEventType::AccessDenied;
   String userId;
@@ -31,6 +33,7 @@ struct AccessEvent {
   uint32_t lockoutUntilEpoch = 0;
 };
 
+// Hasil cek PIN untuk menentukan langkah berikutnya.
 struct AuthResult {
   bool success = false;
   bool isAdmin = false;
@@ -40,6 +43,7 @@ struct AuthResult {
 
 class AccessController {
  public:
+  // Menyiapkan keypad dan mengambil pengaturan.
   void begin(ConfigManager* config);
   void update();
 
@@ -57,17 +61,23 @@ class AccessController {
   bool popEvent(AccessEvent& outEvent);
   bool consumeUnlockRequest();
 
+  // Tambah atau ubah pengguna dari menu admin.
   bool upsertUser(const String& userId, const String& displayName,
                   const String& pin, bool enabled, String& error);
 
   ConfigManager* config() const { return _config; }
 
  private:
+  // Pengaturan utama dibaca dari sini.
   ConfigManager* _config = nullptr;
+  // Objek keypad yang dibentuk saat begin().
   std::unique_ptr<Keypad> _keypad;
+  // Catatan kejadian akses yang belum dibaca.
   std::deque<AccessEvent> _events;
 
+  // Buffer PIN yang sedang diketik.
   String _pinBuffer;
+  // Pesan terakhir yang dipakai layar.
   String _lastMessage = "READY";
   uint8_t _failedAttempts = 0;
   unsigned long _lockoutUntilMs = 0;

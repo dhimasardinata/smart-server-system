@@ -27,6 +27,7 @@ void releaseBusPins() {
 }  // namespace
 
 void I2CBus::begin() {
+  // Mulai ulang jalur komunikasi dengan setelan yang sama.
   Wire.end();
   Wire.begin(Pins::SDA, Pins::SCL);
   Wire.setClock(I2C_CLOCK_HZ);
@@ -45,6 +46,7 @@ bool I2CBus::recover(const char* context) {
     Serial.println(F("I2C: recovering bus"));
   }
 
+  // Kalau jalur macet, kirim beberapa hentakan agar perangkat melepasnya.
   Wire.end();
   releaseBusPins();
   delayMicroseconds(RECOVERY_STEP_US);
@@ -67,9 +69,11 @@ bool I2CBus::recover(const char* context) {
   delayMicroseconds(RECOVERY_STEP_US);
   releaseBusPins();
 
+  // Kalau dua jalurnya kembali normal, berarti sudah lepas.
   const bool busReleased =
       digitalRead(Pins::SDA) == HIGH && digitalRead(Pins::SCL) == HIGH;
 
+  // Setelah itu, hidupkan lagi jalur komunikasi normal.
   begin();
   return busReleased;
 }

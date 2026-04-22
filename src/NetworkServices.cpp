@@ -27,6 +27,7 @@ struct FirmwareUploadContext {
 };
 
 bool isApiPath(const String& url) {
+  // Memisahkan jalur layanan dari halaman biasa.
   return url.startsWith("/api/");
 }
 
@@ -38,6 +39,7 @@ void sendJson(AsyncWebServerRequest* request, JsonDocument& doc) {
 }
 
 size_t requestFirmwareSize(AsyncWebServerRequest* request) {
+  // Ukuran file kadang dikirim lewat header supaya update tahu besar file.
   if (request == nullptr || !request->hasHeader("X-Firmware-Size")) {
     return UPDATE_SIZE_UNKNOWN;
   }
@@ -52,6 +54,7 @@ size_t requestFirmwareSize(AsyncWebServerRequest* request) {
 }
 
 FirmwareUploadContext* uploadContext(AsyncWebServerRequest* request) {
+  // Saat upload berjalan, data sementara disimpan di dalam request ini.
   if (request == nullptr) {
     return nullptr;
   }
@@ -59,6 +62,7 @@ FirmwareUploadContext* uploadContext(AsyncWebServerRequest* request) {
 }
 
 void clearUploadContext(AsyncWebServerRequest* request) {
+  // Bersihkan memori yang dipakai untuk upload setelah selesai.
   FirmwareUploadContext* context = uploadContext(request);
   delete context;
   if (request != nullptr) {
@@ -77,6 +81,7 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
   _access = access;
   OtaCoordinator::instance().begin();
 
+  // Waktu lokal diselaraskan dari internet supaya catatan punya jam yang benar.
   _googleSheets.begin(_config->data.googleScriptUrl);
   configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
 
@@ -101,6 +106,7 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
 void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
                              bool warning, bool solenoidOn, bool alertOn,
                              const char* alertState) {
+  // Nilai penting disalin dulu supaya halaman bisa membacanya aman.
   if (_pendingRestart && millis() >= _restartAtMs) {
     Serial.printf("Restarting after %s\n", _restartReason);
     delay(100);
@@ -134,6 +140,7 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
 }
 
 void NetworkServices::logAccessEvent(const AccessEvent& event) {
+  // Kejadian akses diubah jadi data yang siap dikirim.
   AccessLogPayload payload;
   payload.timestamp = makeTimestampIso8601();
   payload.deviceId = _config->data.deviceId;
@@ -150,6 +157,7 @@ void NetworkServices::logAccessEvent(const AccessEvent& event) {
 
 void NetworkServices::enqueueTelemetryPayload(
     const TelemetryLogPayload& payload) {
+  // Antrean dipakai supaya kirim data tidak mengganggu kerja utama.
   if (tryTakeQueueLock()) {
     _telemetryQueue.push_back(payload);
     if (_telemetryQueue.size() > MAX_QUEUE_SIZE)
@@ -162,12 +170,14 @@ void NetworkServices::enqueueTelemetryPayload(
 }
 
 void NetworkServices::notifyUploader() {
+  // Bagian pengirim dibangunkan kalau ada data baru.
   if (_asyncUploadEnabled && _uploadTask != nullptr) {
     xTaskNotifyGive(_uploadTask);
   }
 }
 
 bool NetworkServices::tryTakeQueueLock(TickType_t waitTicks) {
+  // Kunci ini mencegah dua bagian program mengambil antrean bersamaan.
   if (_queueMutex == nullptr) {
     return true;
   }
@@ -197,11 +207,13 @@ size_t NetworkServices::accessQueueSize() {
 }
 
 void NetworkServices::uploadTaskEntry(void* context) {
+  // FreeRTOS memanggil fungsi ini sebagai pintu masuk tugas pengirim.
   static_cast<NetworkServices*>(context)->uploadTaskLoop();
 }
 
 void NetworkServices::uploadTaskLoop() {
   for (;;) {
+    // Bagian ini menunggu sampai ada data atau waktunya coba lagi.
     bool hasPending = false;
     bool shouldSend = false;
     bool forceFlush = false;
@@ -243,6 +255,7 @@ void NetworkServices::uploadTaskLoop() {
 }
 
 void NetworkServices::enqueueAccessPayload(const AccessLogPayload& payload) {
+  // Catatan akses juga masuk antrean terpisah dari data pantauan.
   if (tryTakeQueueLock()) {
     _accessQueue.push_back(payload);
     if (_accessQueue.size() > MAX_QUEUE_SIZE)
@@ -255,6 +268,8 @@ void NetworkServices::enqueueAccessPayload(const AccessLogPayload& payload) {
 }
 
 void NetworkServices::backoff() {
+  // Kalau pengiriman gagal, tunda percobaan berikutnya supaya tidak berulang-ulang.
+  // Jeda dibuat makin panjang kalau kegagalan terjadi terus-menerus.
   _retryCount = min<uint8_t>(_retryCount + 1, 6);
   const unsigned long delayMs = 1000UL << _retryCount;
   _nextAttemptMs = millis() + min(delayMs, 60000UL);
@@ -263,6 +278,7 @@ void NetworkServices::backoff() {
 
 bool NetworkServices::sendOne() {
   if (!_googleSheets.isConfigured()) {
+    // Kalau cloud belum disetel, jangan kirim dulu.
     if (tryTakeQueueLock()) {
       _nextAttemptMs = millis() + 10000UL;
       _forceFlushRequested = false;
@@ -282,11 +298,14 @@ bool NetworkServices::sendOne() {
   }
 
   if (!_accessQueue.empty()) {
+    // Catatan akses diprioritaskan lebih dulu.
     sendAccessPayload = true;
     accessPayload = _accessQueue.front();
   } else if (!_telemetryQueue.empty()) {
+    // Kalau tidak ada akses, kirim telemetry.
     telemetryPayload = _telemetryQueue.front();
   } else {
+    // Tidak ada data yang perlu dikirim.
     _forceFlushRequested = false;
     if (_queueMutex != nullptr) {
       xSemaphoreGive(_queueMutex);
@@ -308,10 +327,12 @@ bool NetworkServices::sendOne() {
 
   if (ok) {
     if (sendAccessPayload) {
+      // Kalau sukses, hapus catatan akses paling depan.
       if (!_accessQueue.empty()) {
         _accessQueue.pop_front();
       }
     } else if (!_telemetryQueue.empty()) {
+      // Kalau sukses, hapus telemetry paling depan.
       _telemetryQueue.pop_front();
     }
     _retryCount = 0;
@@ -336,6 +357,7 @@ bool NetworkServices::sendOne() {
 }
 
 void NetworkServices::flushQueueTick() {
+  // Jalur lama ini dipakai kalau pengirim latar belakang belum aktif.
   if (_asyncUploadEnabled) {
     notifyUploader();
     return;
@@ -395,6 +417,7 @@ void NetworkServices::enqueueTelemetry() {
 }
 
 void NetworkServices::setupRoutes() {
+  // Semua jalur web utama didaftarkan di sini.
   _server.on("/", HTTP_GET,
              [this](AsyncWebServerRequest* request) { handleRoot(request); });
 
@@ -501,6 +524,7 @@ void NetworkServices::setupRoutes() {
 }
 
 void NetworkServices::setupWiFiRoutes() {
+  // Jalur khusus WiFi dipisah supaya kode lebih mudah dibaca.
   _server.on(
       "/api/wifi/scan", HTTP_GET,
       [this](AsyncWebServerRequest* request) { handleWiFiScan(request); });
@@ -515,8 +539,10 @@ void NetworkServices::setupWiFiRoutes() {
 
 void NetworkServices::handleRoot(AsyncWebServerRequest* request) {
   if (_wifi->isApMode()) {
+    // Saat AP mode, tampilkan halaman pengaturan.
     request->send(200, "text/html", WebPage::SETUP_HTML);
   } else {
+    // Saat normal, tampilkan dashboard.
     request->send(200, "text/html", WebPage::DASHBOARD_HTML);
   }
 }
@@ -535,6 +561,7 @@ void NetworkServices::sendCaptiveRedirect(AsyncWebServerRequest* request) {
 }
 
 void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
+  // Halaman web membaca status terbaru dari sini.
   size_t queueTelemetry = telemetryQueueSize();
   size_t queueAccess = accessQueueSize();
   unsigned long lastSendEpoch = _lastSendEpoch;
@@ -583,6 +610,7 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
 }
 
 void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
+  // Kirim setelan suhu dan kelembapan yang sedang aktif.
   JsonDocument doc;
   doc["warnThreshold"] = _config->data.warnThresholdC;
   doc["stage2Threshold"] = _config->data.stage2ThresholdC;
@@ -596,6 +624,7 @@ void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
                                              JsonVariant& json) {
+  // Ambil setelan baru dari halaman web lalu simpan.
   JsonObject obj = json.as<JsonObject>();
   if (obj["warnThreshold"].is<float>()) {
     _config->data.warnThresholdC = obj["warnThreshold"].as<float>();
@@ -626,6 +655,7 @@ void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
+  // Kirim setelan keamanan agar halaman bisa menampilkannya.
   JsonDocument doc;
   doc["maxFail"] = _config->data.maxFailedAttempts;
   doc["lockoutSecs"] = _config->data.keypadLockoutSec;
@@ -636,6 +666,7 @@ void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
                                               JsonVariant& json) {
+  // Setelan pintu dan identitas alat diperbarui dari halaman web.
   JsonObject obj = json.as<JsonObject>();
   if (obj["maxFail"].is<uint8_t>()) {
     _config->data.maxFailedAttempts =
@@ -657,6 +688,7 @@ void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
+  // Daftar pengguna diubah menjadi data JSON untuk dikirim ke browser.
   JsonDocument doc;
   JsonArray users = doc["users"].to<JsonArray>();
   for (const auto& user : _config->data.users) {
@@ -673,6 +705,7 @@ void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
                                        JsonVariant& json) {
+  // Simpan pengguna baru atau perbarui pengguna yang sudah ada.
   JsonObject obj = json.as<JsonObject>();
   const String userId = obj["userId"] | "";
   const String displayName = obj["displayName"] | "";
@@ -690,6 +723,7 @@ void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
+  // Hapus satu pengguna dari daftar yang tersimpan.
   const String path = request->url();
   const String userId = path.substring(String("/api/users/").length());
   if (userId.length() == 0) {
@@ -715,6 +749,7 @@ void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
 }
 
 void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
+  // Tombol ini memaksa antrean langsung dikirim kalau syaratnya aman.
   JsonDocument doc;
   if (!_wifi->isConnected()) {
     doc["success"] = false;
@@ -740,6 +775,7 @@ void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
 }
 
 void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
+  // Minta daftar jaringan WiFi di sekitar lalu kirim ke browser.
   _wifi->requestScanRefresh();
   const auto networks = _wifi->getScannedNetworks();
   JsonDocument doc;
@@ -758,6 +794,7 @@ void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
                                         JsonVariant& json) {
+  // Browser mengirim nama WiFi dan sandinya ke sini.
   JsonObject obj = json.as<JsonObject>();
   const String ssid = obj["ssid"].as<String>();
   const String password = obj["password"].as<String>();
@@ -787,6 +824,7 @@ void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
+  // Ini menghapus isi penyimpanan internal, jadi dipakai dengan sangat hati-hati.
   if (!_config->formatFileSystem()) {
     request->send(500, "application/json",
                   "{\"error\":\"Failed to format flash\"}");
@@ -800,6 +838,7 @@ void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
 }
 
 void NetworkServices::handleOtaUploadResponse(AsyncWebServerRequest* request) {
+  // Setelah file dikirim, hasil akhirnya dilaporkan lewat fungsi ini.
   FirmwareUploadContext* context = uploadContext(request);
   JsonDocument doc;
 
@@ -841,6 +880,7 @@ void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
                                            const String& filename,
                                            size_t index, uint8_t* data,
                                            size_t len, bool final) {
+  // File firmware dikirim sedikit demi sedikit, bukan sekaligus.
   FirmwareUploadContext* context = uploadContext(request);
   if (index == 0 && context == nullptr) {
     context = new FirmwareUploadContext();
@@ -916,6 +956,7 @@ void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::scheduleRestart(const char* reason, unsigned long delayMs) {
+  // Setelah tugas penting selesai, alat diberi waktu sebentar lalu restart.
   _pendingRestart = true;
   _restartReason =
       (reason != nullptr && reason[0] != '\0') ? reason : "pending operation";

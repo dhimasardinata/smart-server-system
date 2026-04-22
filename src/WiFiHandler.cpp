@@ -5,6 +5,7 @@
 
 namespace {
 const char* wifiStateName(WiFiManager::State state) {
+  // Ubah status internal jadi teks sederhana untuk ditampilkan.
   switch (state) {
     case WiFiManager::State::Idle:
       return "idle";
@@ -28,6 +29,7 @@ void WiFiManager::begin(ConfigManager* config) {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
 
+  // Kalau belum ada WiFi tersimpan, ESP32 masuk AP mode supaya bisa disetel.
   if (_config->getWiFiCount() == 0) {
     Serial.println(F("No saved WiFi networks, starting AP mode"));
     startApMode();
@@ -39,6 +41,7 @@ void WiFiManager::begin(ConfigManager* config) {
 void WiFiManager::update() {
   unsigned long now = millis();
 
+  // Hasil scan manual diproses terpisah agar tidak menunggu mode utama.
   if (_userScanPending && _state != State::Scanning) {
     processUserScanResults();
   }
@@ -91,6 +94,7 @@ void WiFiManager::update() {
 }
 
 void WiFiManager::startScan() {
+  // Mulai scan jaringan yang ada di sekitar ESP32.
   Serial.println(F("WiFi: Starting scan..."));
   WiFi.mode(_keepApAlive ? WIFI_AP_STA : WIFI_STA);
   _state = State::Scanning;
@@ -99,6 +103,7 @@ void WiFiManager::startScan() {
 }
 
 void WiFiManager::processScanResults() {
+  // Scan hasilnya diurutkan berdasarkan sinyal terkuat supaya koneksi lebih stabil.
   int n = WiFi.scanComplete();
   if (n < 0)
     return;
@@ -194,6 +199,7 @@ void WiFiManager::tryNextNetwork() {
 }
 
 bool WiFiManager::verifyInternet() {
+  // Cek internet dengan panggilan kecil ke halaman pemeriksaan umum.
   HTTPClient http;
   http.setTimeout(5000);
   http.begin(CONNECTIVITY_CHECK_URL);
@@ -221,6 +227,7 @@ void WiFiManager::onAllFailed() {
 }
 
 void WiFiManager::startApMode() {
+  // AP mode dipakai kalau belum ada jaringan tersimpan atau semua gagal.
   Serial.println(F("WiFi: Preparing AP mode"));
   _keepApAlive = false;
   _dnsServer.stop();

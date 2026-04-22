@@ -17,23 +17,34 @@
 
 class NetworkServices {
  public:
+  // Pengurus web, antrean kirim, dan layanan cloud.
   NetworkServices();
 
+  // Menyalakan layanan lokal dan pengirim data ke luar.
   void begin(ConfigManager* config, WiFiManager* wifi, SensorManager* sensors,
              AccessController* access);
+  // Dipanggil berkala untuk memperbarui salinan data dan antrean kirim.
   void update(const SensorData& data, bool fan1On, bool fan2On, bool warning,
               bool solenoidOn, bool alertOn, const char* alertState);
+  // Simpan kejadian akses ke antrean agar nanti dikirim.
   void logAccessEvent(const AccessEvent& event);
 
  private:
+  // Server web lokal di port 80.
   AsyncWebServer _server;
+  // Setelan utama.
   ConfigManager* _config = nullptr;
+  // Pengurus WiFi yang sedang dipakai.
   WiFiManager* _wifi = nullptr;
+  // Pengurus sensor.
   SensorManager* _sensors = nullptr;
+  // Pengurus akses pintu.
   AccessController* _access = nullptr;
 
+  // Pengirim data ke spreadsheet.
   GoogleSheetsClient _googleSheets;
 
+  // Salinan data terakhir agar aman dibaca web.
   SensorData _cachedData{};
   bool _cachedFan1On = false;
   bool _cachedFan2On = false;
@@ -48,6 +59,7 @@ class NetworkServices {
   unsigned long _lastTelemetryEnqueueMs = 0;
   unsigned long _lastSendEpoch = 0;
 
+  // Antrean telemetry dan akses.
   std::deque<TelemetryLogPayload> _telemetryQueue;
   std::deque<AccessLogPayload> _accessQueue;
   unsigned long _nextAttemptMs = 0;

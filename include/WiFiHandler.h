@@ -11,6 +11,7 @@
 class WiFiManager {
  public:
   enum class State : uint8_t {
+    // Tahap sambungan jaringan dari cari sampai nyambung.
     Idle,
     Scanning,
     Connecting,
@@ -21,6 +22,7 @@ class WiFiManager {
 
   WiFiManager() = default;
 
+  // Mulai dari daftar jaringan yang sudah disimpan.
   void begin(ConfigManager* config);
   void update();
 
@@ -34,6 +36,7 @@ class WiFiManager {
   [[nodiscard]] unsigned long lastScanAgeMs() const;
 
   void startApMode();
+  // Coba sambung ke jaringan yang dipilih.
   bool connectTo(const String& ssid, const String& password);
   void requestScanRefresh(bool force = false);
   [[nodiscard]] const char* stateName() const;
@@ -48,7 +51,9 @@ class WiFiManager {
   [[nodiscard]] std::vector<ScannedNetwork> getScannedNetworks() const;
 
  private:
+  // Pengaturan utama dibaca dari sini.
   ConfigManager* _config = nullptr;
+  // Status jaringan saat ini.
   State _state = State::Idle;
 
   unsigned long _lastAction = 0;
@@ -63,9 +68,12 @@ class WiFiManager {
     String password;
     int32_t rssi;
   };
+  // Daftar jaringan yang cocok saat pindai.
   std::vector<MatchedNetwork> _matchedNetworks;
+  // Hasil pindai semua jaringan sekitar.
   std::vector<ScannedNetwork> _allScannedNetworks;
 
+  // Nama jaringan sementara untuk penyetelan awal.
   DNSServer _dnsServer;
   static constexpr const char* AP_SSID = "TempMonitor-Setup";
   static constexpr const char* AP_PASS = "";

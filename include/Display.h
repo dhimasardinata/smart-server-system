@@ -9,8 +9,10 @@ struct UserCredential;
 
 class Display {
  public:
+  // Pengurus layar LCD.
   Display(uint8_t addr, uint8_t cols, uint8_t rows);
 
+  // Menyalakan layar dan memastikan jalur komunikasinya siap.
   bool begin();
   bool maintainConnection();
   void scheduleRecovery(unsigned long delayMs = 30);
@@ -24,6 +26,7 @@ class Display {
   void showStartup();
   void showApMode(std::string_view ip);
   void showError(std::string_view message);
+  // Layar utama menampilkan suhu, kelembapan, kipas, dan pintu.
   void showMainScreen();
 
   void showPinEntry(uint8_t pinLen, bool lockout = false, uint32_t lockSec = 0);
@@ -35,6 +38,7 @@ class Display {
   void showConfirmDelete(const String& userId);
   void showMessage(const char* title, const char* msg, bool success);
 
+  // Salin data terbaru ke layar.
   void setWifiInfo(bool connected, const String& ip);
   void setTelemetry(float temperature, float humidity, bool valid, bool fan1On,
                     bool fan2On, bool warning);
@@ -45,12 +49,18 @@ class Display {
   [[nodiscard]] bool isReady() const { return _ready; }
 
  private:
+  // Objek LCD dari pustaka.
   LiquidCrystal_I2C _lcd;
+  // Alamat I2C layar.
   uint8_t _addr;
+  // Lebar layar.
   uint8_t _cols;
+  // Tinggi layar.
   uint8_t _rows;
+  // Penanda apakah layar siap dipakai.
   bool _ready = false;
 
+  // Data terbaru yang akan ditampilkan.
   bool _wifiConnected = false;
   String _ipAddress = "-";
   float _temperature = 0.0f;
@@ -69,6 +79,7 @@ class Display {
   bool _recoveredSinceLastCheck = false;
   bool _recoveryScheduled = false;
 
+  // Status scrolling dan pemulihan koneksi.
   unsigned long _lastScrollTime = 0;
   int _scrollOffset = 0;
   static constexpr unsigned long SCROLL_INTERVAL = 350;

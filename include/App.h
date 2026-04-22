@@ -12,6 +12,7 @@
 #include <freertos/task.h>
 
 enum class UIState : uint8_t {
+  // Keadaan tampilan utama dan menu lain.
   MONITORING,
   PIN_ENTRY,
   UNLOCK_OK,
@@ -24,6 +25,7 @@ enum class UIState : uint8_t {
 };
 
 enum class AlertState : uint8_t {
+  // Jenis tanda bahaya yang bisa muncul.
   Idle,
   AccessGranted,
   AccessDenied,
@@ -34,24 +36,36 @@ enum class AlertState : uint8_t {
 
 class App {
  public:
+  // Objek ini mengurus semua bagian sistem dari awal sampai akhir.
   App();
 
+  // Bagian awal dan bagian yang terus berulang.
   void setup();
   void loop();
 
  private:
+  // Pengurus setelan yang dibaca dari memori internal.
   ConfigManager _config;
+  // Pengurus sambungan WiFi dan mode jaringan.
   WiFiManager _wifi;
+  // Pengurus sensor suhu dan kelembapan.
   SensorManager _sensors;
+  // Pengurus keypad dan akses pintu.
   AccessController _access;
+  // Pengurus halaman web dan pengiriman data.
   NetworkServices _network;
+  // Pengurus layar LCD.
   Display _display;
+  // Pengunci agar data tidak ditulis bersamaan.
   SemaphoreHandle_t _runtimeMutex = nullptr;
+  // Tugas latar belakang untuk jaringan dan pengiriman data.
   TaskHandle_t _backgroundTask = nullptr;
+  // Tugas khusus untuk pembaruan program.
   TaskHandle_t _otaTask = nullptr;
   bool _backgroundTaskEnabled = false;
   bool _otaTaskEnabled = false;
 
+  // Status kipas dan alarm yang dipakai sistem.
   bool _fan1On = false;
   bool _fan2On = false;
   bool _warning = false;
@@ -67,6 +81,7 @@ class App {
   uint8_t _thermalTier = 0;
   unsigned long _alertUntilMs = 0;
 
+  // Keadaan menu dan input pengguna di layar.
   UIState _uiState = UIState::MONITORING;
   String _pinBuf;
   String _confirmBuf;
@@ -83,17 +98,20 @@ class App {
   unsigned long _lastLockoutRefreshMs = 0;
   UIState _statusReturnState = UIState::MONITORING;
 
+  // Batas waktu tampilan untuk berbagai pesan sementara.
   static constexpr unsigned long UI_TIMEOUT_MS = 30000;
   static constexpr unsigned long UNLOCK_DISPLAY_MS = 3000;
   static constexpr unsigned long AP_DISPLAY_REFRESH_MS = 1000;
   static constexpr unsigned long LOCKOUT_REFRESH_MS = 1000;
   static constexpr uint8_t ALERT_QUEUE_SIZE = 6;
 
+  // Antrian tanda bahaya agar muncul satu per satu.
   AlertState _alertQueue[ALERT_QUEUE_SIZE] = {};
   uint8_t _alertQueueHead = 0;
   uint8_t _alertQueueTail = 0;
   uint8_t _alertQueueCount = 0;
 
+  // Salinan ringkas keadaan sistem untuk dibaca tugas lain.
   struct RuntimeSnapshot {
     SensorData data{};
     bool fan1On = false;
@@ -104,6 +122,7 @@ class App {
     AlertState alertState = AlertState::Idle;
   } _runtimeSnapshot;
 
+  // Fungsi bantu untuk menyiapkan bagian-bagian sistem.
   void setupOTA();
   void setupRelays();
   void startBackgroundTask();
@@ -114,6 +133,7 @@ class App {
   static void otaTaskEntry(void* context);
   void backgroundTaskLoop();
   void otaTaskLoop();
+  // Fungsi bantu untuk menentukan keadaan dan tampilan.
   void updateThermalAndFans(const SensorData& data);
   void updateSolenoid();
   void updateAlert();
@@ -129,18 +149,22 @@ class App {
   [[nodiscard]] uint16_t alertDurationMs(AlertState state) const;
   [[nodiscard]] const char* alertStateName() const;
   static const char* alertStateName(AlertState state);
+  // Fungsi bantu untuk memasang relay dan input pengguna.
   void requestUnlock();
   void startUnlockSession(const String& displayName);
   void setRelay(uint8_t pin, bool on);
+  // Fungsi bantu untuk menggambar ulang layar.
   void updateDisplay(const SensorData& data);
   void renderCurrentUiState();
   void showTransientMessage(const char* title, const char* msg, bool success,
                             UIState returnState, unsigned long durationMs);
+  // Fungsi bantu untuk membaca tombol dan mengatur menu.
   void handleUIKey(char key);
   void resetToMonitoring();
   void buildUserSlotMap();
   void popLastDigit(String& buffer);
 
+  // Peta slot pengguna untuk menu daftar.
   static constexpr uint8_t MAX_SLOTS = 10;
   uint8_t _userSlotCount = 0;
   uint8_t _userSlotMap[MAX_SLOTS] = {};

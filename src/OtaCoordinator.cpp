@@ -2,6 +2,7 @@
 
 namespace {
 const char* modeLabel(OtaCoordinator::Mode mode) {
+  // Nama ini dipakai saat keadaan pembaruan ingin ditampilkan.
   switch (mode) {
     case OtaCoordinator::Mode::Arduino:
       return "arduino";
@@ -20,6 +21,7 @@ OtaCoordinator& OtaCoordinator::instance() {
 }
 
 void OtaCoordinator::begin() const {
+  // Pengaman dibuat sekali supaya keadaannya aman dibaca banyak bagian.
   if (_mutex != nullptr) {
     return;
   }
@@ -30,6 +32,7 @@ void OtaCoordinator::begin() const {
 }
 
 bool OtaCoordinator::beginArduino() {
+  // Dua cara pembaruan ini tidak boleh berjalan bersamaan.
   begin();
   return withLock([this]() {
     if (_mode == Mode::Web) {
@@ -73,6 +76,7 @@ void OtaCoordinator::finishArduino(bool success, const char* message) {
 }
 
 bool OtaCoordinator::beginWeb(size_t totalBytes, const String& filename) {
+  // Pembaruan lewat halaman punya aturan sendiri dan menyimpan nama file.
   begin();
   return withLock([this, totalBytes, &filename]() {
     if (_mode == Mode::Arduino || (_mode == Mode::Web && _busy)) {
@@ -92,6 +96,7 @@ bool OtaCoordinator::beginWeb(size_t totalBytes, const String& filename) {
 void OtaCoordinator::updateWebProgress(size_t progressBytes, size_t totalBytes) {
   begin();
   withLock([this, progressBytes, totalBytes]() {
+    // Hitung persentase kemajuan file yang sedang diterima.
     _mode = Mode::Web;
     _busy = true;
     _progress = totalBytes > 0
@@ -121,6 +126,7 @@ void OtaCoordinator::finishWeb(bool success, const String& message) {
 }
 
 bool OtaCoordinator::canServeArduino() const {
+  // Kalau web OTA aktif, kabel OTA harus menunggu.
   return snapshot().mode != Mode::Web;
 }
 
@@ -132,6 +138,7 @@ bool OtaCoordinator::isWebActive() const {
 OtaCoordinator::Snapshot OtaCoordinator::snapshot() const {
   begin();
   return withLock([this]() {
+    // Salin keadaan terkini ke potret kecil.
     Snapshot state;
     state.mode = _mode;
     state.busy = _busy;
@@ -142,6 +149,7 @@ OtaCoordinator::Snapshot OtaCoordinator::snapshot() const {
 }
 
 String OtaCoordinator::modeName() const {
+  // Ubah mode menjadi teks supaya mudah ditampilkan.
   return String(modeLabel(snapshot().mode));
 }
 

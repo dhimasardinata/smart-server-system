@@ -1,9 +1,13 @@
+// Dashboard ini membaca data dari Google Sheets, lalu menampilkannya
+// dalam bentuk kartu ringkas, tabel, grafik, dan notifikasi.
+// Kunci di bawah ini dipakai untuk menyimpan setelan di browser.
 const CONFIG_KEY = 'smart-server-sheet-id';
 const DEFAULT_SHEET_ID = '1rKF8ZZWsYCXlh_yixmdfKyZA6omkj64F5pEjiMcfAw8';
 const REFRESH_INTERVAL = 15000;
 const NOTIF_KEY = 'smart-server-notif';
 const PAGE_SIZE = 10;
 
+// Semua elemen halaman disimpan di satu tempat supaya mudah dipakai ulang.
 const el = {
     statusDot: document.getElementById('status-dot'),
     statusText: document.getElementById('status-text'),
@@ -52,12 +56,15 @@ let telemetryPage = 1;
 let accessPage = 1;
 
 function initChart() {
+    // Grafik dibuat sekali saat halaman mulai agar update berikutnya cepat.
     const ctx = document.getElementById('trend-chart').getContext('2d');
 
+    // Warna gradasi untuk garis suhu.
     const tempGrad = ctx.createLinearGradient(0, 0, 0, 320);
     tempGrad.addColorStop(0, 'rgba(79, 143, 255, 0.3)');
     tempGrad.addColorStop(1, 'rgba(79, 143, 255, 0.0)');
 
+    // Warna gradasi untuk garis kelembapan.
     const humGrad = ctx.createLinearGradient(0, 0, 0, 320);
     humGrad.addColorStop(0, 'rgba(34, 211, 238, 0.25)');
     humGrad.addColorStop(1, 'rgba(34, 211, 238, 0.0)');
@@ -129,6 +136,7 @@ function initChart() {
 }
 
 function loadConfig() {
+    // Kalau pernah simpan ID spreadsheet, ambil lagi dari localStorage.
     const savedSheet = localStorage.getItem(CONFIG_KEY);
     el.sheetId.value = savedSheet || DEFAULT_SHEET_ID;
     el.notifToggle.checked = localStorage.getItem(NOTIF_KEY) === 'true';
@@ -136,8 +144,10 @@ function loadConfig() {
 }
 
 function saveConfig() {
+    // Ambil nilai spreadsheet dari kotak input.
     const value = (el.sheetId.value || '').trim();
     if (!value) return null;
+    // Simpan pilihan ke browser agar tidak hilang saat halaman ditutup.
     localStorage.setItem(CONFIG_KEY, value);
     localStorage.setItem(NOTIF_KEY, el.notifToggle.checked);
     showToast('Terhubung', 'ID Spreadsheet tersimpan', 'success');
@@ -145,6 +155,7 @@ function saveConfig() {
 }
 
 function showToast(title, message, type = 'warning') {
+    // Toast adalah pop-up kecil untuk memberi informasi cepat.
     if (!el.notifToggle.checked && type !== 'success') return;
 
     const toast = document.createElement('div');
@@ -174,6 +185,7 @@ function showToast(title, message, type = 'warning') {
 }
 
 function parseGvizDate(value) {
+    // Tanggal dari spreadsheet bisa datang dalam beberapa bentuk.
     if (value instanceof Date) return value;
     if (typeof value === 'string' && value.includes('Date(')) {
         const m = value.match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
@@ -187,6 +199,8 @@ function parseGvizDate(value) {
 }
 
 async function fetchSheet(sheetId, sheetName) {
+    // Ambil data dari spreadsheet lewat alamat publik gviz.
+    // Hasil mentah ini nanti dipilah lagi supaya cocok dengan tampilan.
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
     const response = await fetch(url);
     const text = await response.text();
@@ -196,7 +210,9 @@ async function fetchSheet(sheetId, sheetName) {
 }
 
 function parseTelemetry(gviz) {
+    // Data dari spreadsheet diubah menjadi format yang mudah dipakai halaman ini.
     return (gviz?.table?.rows || []).map(r => {
+        // Ambil kolom satu per satu dari baris spreadsheet.
         const c = r.c || [];
         const temp = Number(c[2]?.v);
         const hum = Number(c[3]?.v);
@@ -221,6 +237,7 @@ function parseTelemetry(gviz) {
 
 function parseAccess(gviz) {
     return (gviz?.table?.rows || []).map(r => {
+        // Ambil data akses dari kolom yang sesuai.
         const c = r.c || [];
         return {
             timestamp: parseGvizDate(c[0]?.v),
@@ -245,12 +262,14 @@ function fmtTime(dt) {
 }
 
 function setStatus(online, text) {
+    // Lampu kecil ini menandakan apakah data berhasil dimuat.
     el.statusDot.classList.toggle('online', online);
     el.statusDot.classList.toggle('offline', !online);
     el.statusText.textContent = text;
 }
 
 function badgeClass(type, value) {
+    // Pilih warna label kecil sesuai keadaan data.
     const map = {
         fan: value ? 'badge-on' : 'badge-off',
         alarm: value === 'ALARM' ? 'badge-alarm' : 'badge-normal',
@@ -261,6 +280,7 @@ function badgeClass(type, value) {
 }
 
 function rssiQuality(rssi) {
+    // Ubah nilai sinyal jadi kata yang mudah dibaca.
     if (rssi >= -50) return { text: 'Sangat Baik', cls: 'badge-success' };
     if (rssi >= -60) return { text: 'Baik', cls: 'badge-success' };
     if (rssi >= -70) return { text: 'Cukup', cls: 'badge-warning' };
@@ -270,6 +290,7 @@ function rssiQuality(rssi) {
 function safeFixed(v) { return isFinite(v) ? v.toFixed(1) : '--'; }
 
 function renderPagination(container, totalItems, currentPage, onPageChange) {
+    // Hitung jumlah halaman yang perlu ditampilkan.
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
 
@@ -297,6 +318,8 @@ function renderPagination(container, totalItems, currentPage, onPageChange) {
 }
 
 function renderTelemetryTable(items, page) {
+    // Tabel pantauan menampilkan data terbaru di bagian atas.
+    // Urutkan dari data paling baru ke paling lama.
     const allSorted = items.slice().reverse();
     const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
     if (page > totalPages) page = totalPages;
@@ -328,6 +351,8 @@ function renderTelemetryTable(items, page) {
 }
 
 function renderAccessTable(items, page) {
+    // Tabel akses juga diurutkan dari data paling baru.
+    // Urutkan dari data paling baru ke paling lama.
     const allSorted = items.slice().reverse();
     const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
     if (page > totalPages) page = totalPages;
@@ -356,6 +381,8 @@ function renderAccessTable(items, page) {
 }
 
 function updateAlertState(latest) {
+    // Kalau data melewati ambang, tampilkan peringatan yang sesuai.
+    // Bersihkan kelas lama dulu supaya tampilan tidak numpuk.
     el.tempCard.classList.remove('card-warning', 'card-alarm');
     el.humCard.classList.remove('card-warning', 'card-alarm');
 
@@ -402,7 +429,9 @@ function updateAlertState(latest) {
 }
 
 function updateSummary(telemetry, access) {
+    // Ringkasan di layar utama diambil dari data terbaru saja.
     if (telemetry.length === 0) {
+        // Kalau belum ada data, tampilkan tanda kosong.
         el.tempValue.textContent = '--';
         el.humValue.textContent = '--';
         el.rssiValue.textContent = '--';
@@ -411,10 +440,12 @@ function updateSummary(telemetry, access) {
 
     const latest = telemetry[telemetry.length - 1];
 
+    // Tampilkan suhu dan kelembapan terbaru.
     el.tempValue.textContent = safeFixed(latest.temperature);
     el.humValue.textContent = safeFixed(latest.humidity);
 
     if (latest.wifiRssi !== 0) {
+        // Tampilkan kualitas sinyal kalau nilainya ada.
         el.rssiValue.textContent = latest.wifiRssi;
         const rq = rssiQuality(latest.wifiRssi);
         el.rssiQuality.innerHTML = `<span class="badge ${rq.cls}">${rq.text}</span>`;
@@ -424,6 +455,7 @@ function updateSummary(telemetry, access) {
     }
 
     if (latest.warnThreshold != null && isFinite(latest.warnThreshold)) {
+        // Tampilkan ambang batas yang dipakai ESP32.
         el.tempThreshold.textContent = `Peringatan: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
         el.humThreshold.textContent = `Peringatan: ${latest.warnHumThreshold ?? '--'}% · Alarm: ${latest.stage2HumThreshold ?? '--'}%`;
         el.thWarn.textContent = `${latest.warnThreshold}°C`;
@@ -466,6 +498,7 @@ function updateSummary(telemetry, access) {
     updateAlertState(latest);
 
     const now = Date.now();
+    // Hitung ringkasan akses 24 jam terakhir.
     const dayAgo = now - 86400000;
     const access24 = access.filter(x => x.timestamp && x.timestamp.getTime() >= dayAgo);
     const granted = access24.filter(x => x.result === 'GRANTED').length;
@@ -477,6 +510,7 @@ function updateSummary(telemetry, access) {
     el.lockoutCount.textContent = lockout;
 
     if (access.length > 0) {
+        // Kalau ada data akses terbaru, bisa tampilkan peringatan cepat.
         const latestAccess = access[access.length - 1];
         const oneMinuteAgo = now - 60000;
         if (latestAccess.timestamp.getTime() >= oneMinuteAgo) {
@@ -498,6 +532,8 @@ function updateSummary(telemetry, access) {
 }
 
 async function refresh() {
+    // Satu kali muat ulang mengambil data pantauan dan akses sekaligus.
+    // Ambil ID spreadsheet dari browser.
     const sheetId = loadConfig();
     if (!sheetId) {
         setStatus(false, 'Spreadsheet belum dikonfigurasi');
@@ -514,10 +550,12 @@ async function refresh() {
         accessData = parseAccess(accessRaw);
 
         if (telemetryData.length === 0) {
+            // Kalau belum ada data, beri status yang jelas.
             setStatus(false, 'Tidak ada data');
             return;
         }
 
+        // Gambar ulang semua bagian halaman.
         updateSummary(telemetryData, accessData);
         renderTelemetryTable(telemetryData, telemetryPage);
         renderAccessTable(accessData, accessPage);
@@ -530,17 +568,21 @@ async function refresh() {
 }
 
 el.saveBtn.addEventListener('click', () => {
+    // Simpan ID spreadsheet lalu muat ulang data.
     const id = saveConfig();
     if (id) refresh();
 });
 
 el.notifToggle.addEventListener('change', () => {
+    // Simpan pilihan notifikasi saat saklar diubah.
     localStorage.setItem(NOTIF_KEY, el.notifToggle.checked);
 });
 
 if (el.refreshBtn) el.refreshBtn.addEventListener('click', refresh);
 
+// Jalankan saat halaman dibuka.
 initChart();
 loadConfig();
 refresh();
+// Refresh otomatis setiap beberapa detik.
 setInterval(refresh, REFRESH_INTERVAL);

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 struct TelemetryLogPayload {
+  // Data pantauan suhu dan kelembapan.
   String timestamp;
   String deviceId;
   float temperatureC = 0.0f;
@@ -19,6 +20,7 @@ struct TelemetryLogPayload {
 };
 
 struct AccessLogPayload {
+  // Data kejadian saat pintu dipakai.
   String timestamp;
   String deviceId;
   String userId;
@@ -32,6 +34,7 @@ struct AccessLogPayload {
 
 class GoogleSheetsClient {
  public:
+  // Menyimpan alamat tujuan untuk mengirim data.
   void begin(const String& scriptUrl);
 
   bool sendTelemetry(const TelemetryLogPayload& payload);
@@ -42,9 +45,13 @@ class GoogleSheetsClient {
   const String& getLastError() const { return _lastError; }
 
  private:
+  // Alamat skrip cloud yang dipakai.
   String _scriptUrl;
+  // Penanda apakah alamat sudah siap.
   bool _configured = false;
+  // Kode HTTP terakhir yang diterima.
   int _lastHttpCode = 0;
+  // Pesan salah terakhir.
   String _lastError;
 
   bool sendGetRequest(const String& url);

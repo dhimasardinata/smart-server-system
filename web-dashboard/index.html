@@ -12,6 +12,7 @@
 </head>
 
 <body>
+    <!-- Halaman ini adalah dashboard cloud untuk memantau data ESP32. -->
     <div class="noise" aria-hidden="true"></div>
     <div class="orb orb-1" aria-hidden="true"></div>
     <div class="orb orb-2" aria-hidden="true"></div>
@@ -39,6 +40,7 @@
             </div>
         </header>
 
+        <!-- Bagian ini dipakai untuk menghubungkan dashboard ke spreadsheet. -->
         <section class="config glass" id="config-section">
             <div class="config-inner">
                 <div class="config-field">
@@ -58,6 +60,7 @@
                 </div>
             </div>
 
+            <!-- Kartu ringkasan data utama. -->
             <section class="metrics">
                 <article class="metric-card glass" id="temp-card">
                     <div class="metric-header">
@@ -170,6 +173,7 @@
                 </article>
             </section>
 
+            <!-- Grafik tren suhu dan kelembapan. -->
             <section class="chart-panel glass">
                 <div class="panel-header">
                     <h2>Tren Telemetri</h2>
@@ -180,6 +184,7 @@
                 </div>
             </section>
 
+            <!-- Tabel log telemetry. -->
             <section class="table-panel glass">
                 <div class="panel-header">
                     <h2>Log Telemetri</h2>
@@ -204,6 +209,7 @@
                 <div class="pagination" id="telemetry-pagination"></div>
             </section>
 
+            <!-- Tabel log akses. -->
             <section class="table-panel glass">
                 <div class="panel-header">
                     <h2>Log Akses</h2>

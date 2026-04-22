@@ -10,6 +10,7 @@ constexpr size_t PIN_MAX_LEN = 8;
 constexpr size_t PIN_MIN_LEN = 4;
 
 String hashPinSha256(const String& pin) {
+  // PIN tidak disimpan apa adanya, tapi diubah jadi kode pengaman.
   uint8_t hash[32];
   mbedtls_sha256_context ctx;
   mbedtls_sha256_init(&ctx);
@@ -28,6 +29,7 @@ String hashPinSha256(const String& pin) {
 }
 
 bool isValidPinFormat(const String& pin) {
+  // PIN harus angka semua dan panjangnya sesuai ketentuan.
   if (pin.length() < PIN_MIN_LEN || pin.length() > PIN_MAX_LEN) return false;
   for (size_t i = 0; i < pin.length(); ++i) {
     if (!isDigit(pin[i])) return false;
@@ -39,6 +41,7 @@ bool isValidPinFormat(const String& pin) {
 void AccessController::begin(ConfigManager* config) {
   _config = config;
 
+  // Susunan tombol disiapkan sekali agar langsung bisa dipakai.
   static char keymap[Pins::KEYPAD_ROWS][Pins::KEYPAD_COLS] = {
       {Pins::KEYPAD_MAP[0][0], Pins::KEYPAD_MAP[0][1], Pins::KEYPAD_MAP[0][2],
        Pins::KEYPAD_MAP[0][3]},
@@ -104,6 +107,7 @@ AuthResult AccessController::validatePin(const String& pin) {
   AuthResult result;
   if (_config == nullptr || !isValidPinFormat(pin)) return result;
 
+  // Kalau cocok dengan salah satu pengguna aktif, akses diterima.
   const String hash = hashPinSha256(pin);
   for (const auto& user : _config->data.users) {
     if (!user.enabled || user.userId.length() == 0) continue;
@@ -132,6 +136,7 @@ AuthResult AccessController::validatePin(const String& pin) {
   _failedAttempts++;
   _lastMessage = "ACCESS DENIED";
 
+  // Simpan percobaan gagal untuk menghitung batas berikutnya.
   AccessEvent denied;
   denied.type = AccessEventType::AccessDenied;
   denied.result = "DENIED";
@@ -182,6 +187,7 @@ bool AccessController::changePin(const String& userId, const String& newPin,
 }
 
 String AccessController::generateUserId() const {
+  // Buat nama pengguna otomatis yang belum dipakai.
   if (_config == nullptr) return "user01";
   for (int i = 1; i <= 99; ++i) {
     char buf[8];
@@ -206,6 +212,7 @@ bool AccessController::consumeUnlockRequest() {
 }
 
 bool AccessController::isLockoutActive() const {
+  // Kondisi terkunci masih aktif kalau waktunya belum selesai.
   return _lockoutUntilMs > millis();
 }
 
@@ -227,6 +234,7 @@ bool AccessController::popEvent(AccessEvent& outEvent) {
 }
 
 void AccessController::update() {
+  // Saat penguncian selesai, kirim penanda agar tampilan ikut menyesuaikan.
   const bool lockoutNow = isLockoutActive();
   if (_lockoutWasActive && !lockoutNow) {
     AccessEvent event;

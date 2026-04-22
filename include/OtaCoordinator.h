@@ -7,9 +7,11 @@
 
 class OtaCoordinator {
  public:
+  // Ada tiga pilihan: diam, pembaruan lewat kabel, atau pembaruan lewat halaman.
   enum class Mode : uint8_t { Idle, Arduino, Web };
 
   struct Snapshot {
+    // Potret singkat untuk menampilkan keadaan pembaruan.
     Mode mode = Mode::Idle;
     bool busy = false;
     uint8_t progress = 0;
@@ -18,6 +20,7 @@ class OtaCoordinator {
 
   static OtaCoordinator& instance();
 
+  // Siapkan pengunci dan keadaan awal sekali saja.
   void begin() const;
 
   bool beginArduino();
@@ -36,10 +39,15 @@ class OtaCoordinator {
  private:
   OtaCoordinator() = default;
 
+  // Pengunci supaya status pembaruan tidak kacau.
   mutable SemaphoreHandle_t _mutex = nullptr;
+  // Mode pembaruan yang sedang aktif.
   Mode _mode = Mode::Idle;
+  // Penanda apakah sedang sibuk.
   bool _busy = false;
+  // Persentase kemajuan.
   uint8_t _progress = 0;
+  // Pesan status yang terakhir.
   String _message = "Siap";
 
   template <typename Fn>

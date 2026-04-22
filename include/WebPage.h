@@ -2,6 +2,7 @@
 
 namespace WebPage {
 
+// Tampilan web disimpan di sini supaya bisa dikirim langsung dari perangkat.
 constexpr const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="id">
@@ -69,6 +70,7 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 <div><div class="bt">Smart Server</div><h1><span class="grd">Pengaturan</span></h1></div>
 <a href="/" style="text-decoration:none"><button class="btn bs">&larr; Dashboard</button></a>
 </header>
+<!-- Bagian ini berisi pengaturan jaringan, suhu, keamanan, pengguna, dan pembaruan. -->
 <div class="tabs">
 <button class="tb active" data-tab="wifi" onclick="sT('wifi')">WiFi</button>
 <button class="tb" data-tab="thermal" onclick="sT('thermal')">Termal</button>
@@ -90,6 +92,8 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 <div class="grid">
 <div><label>Ambang Peringatan (&deg;C)</label><input id="warn-th" type="number" step="0.1"></div>
 <div><label>Ambang Alarm (&deg;C)</label><input id="stage2-th" type="number" step="0.1"></div>
+<div><label>Ambang Peringatan Kelembapan (%)</label><input id="warn-hum-th" type="number" step="0.1" min="0" max="100"></div>
+<div><label>Ambang Alarm Kelembapan (%)</label><input id="stage2-hum-th" type="number" step="0.1" min="0" max="100"></div>
 <div><label>Kipas 1 Dasar</label><select id="fan1-baseline"><option value="true">NYALA</option><option value="false">MATI</option></select></div>
 <div><label>Interval Sensor (detik)</label><input id="sensor-int" type="number" min="1"></div>
 <div><label>Interval Cloud (detik)</label><input id="cloud-int" type="number" min="10"></div>
@@ -144,8 +148,8 @@ function renderWifiList(nets,pending){var l=document.getElementById('wifi-list')
 async function scanWifi(){toast('Memindai jaringan...',true);var st=Date.now();while(Date.now()-st<15000){try{var d=await fj('/api/wifi/scan');var nets=d.networks||[];renderWifiList(nets,!!d.pending);if(!d.pending){toast('Ditemukan '+nets.length+' jaringan',true);return}}catch(e){toast('Pindai gagal',false);return}await new Promise(function(r){setTimeout(r,800)})}toast('Pindai timeout',false)}
 async function connectWifi(){var si=document.getElementById('wifi-ssid').value.trim();var ssid=si||selectedSsid;if(!ssid){toast('Pilih atau isi SSID',false);return}var pass=document.getElementById('wifi-pass').value;toast('Menghubungkan ke '+ssid+'...',true);var d=await fj('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,password:pass})});if(!d.success){toast(d.error||'Gagal terhubung',false);return}await waitForWifi(ssid)}
 async function waitForWifi(ts){var st=Date.now();while(Date.now()-st<20000){await new Promise(function(r){setTimeout(r,1000)});try{var s=await fj('/api/state');if(s.wifiConnected){toast('Terhubung ke '+(s.ssid||ts)+(s.ip?' | IP '+s.ip:''),true);return}if(s.wifiState==='ap'){toast('Gagal. Periksa SSID/kata sandi.',false);return}}catch(e){}}toast('Timeout. Periksa serial monitor.',false)}
-async function loadThermal(){var c=await fj('/api/config/thermal');document.getElementById('warn-th').value=c.warnThreshold??27;document.getElementById('stage2-th').value=c.stage2Threshold??28;document.getElementById('fan1-baseline').value=String(c.fan1BaselineOn??true);document.getElementById('sensor-int').value=c.sensorReadIntervalSec??5;document.getElementById('cloud-int').value=c.cloudSendIntervalSec??60}
-async function saveThermal(){var r=await fetch('/api/config/thermal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warnThreshold:parseFloat(document.getElementById('warn-th').value),stage2Threshold:parseFloat(document.getElementById('stage2-th').value),fan1BaselineOn:document.getElementById('fan1-baseline').value==='true',sensorReadIntervalSec:parseInt(document.getElementById('sensor-int').value),cloudSendIntervalSec:parseInt(document.getElementById('cloud-int').value)})});toast(r.ok?'Konfigurasi termal tersimpan':'Gagal menyimpan',r.ok)}
+async function loadThermal(){var c=await fj('/api/config/thermal');document.getElementById('warn-th').value=c.warnThreshold??27;document.getElementById('stage2-th').value=c.stage2Threshold??28;document.getElementById('warn-hum-th').value=c.warnHumPct??65;document.getElementById('stage2-hum-th').value=c.stage2HumPct??75;document.getElementById('fan1-baseline').value=String(c.fan1BaselineOn??true);document.getElementById('sensor-int').value=c.sensorReadIntervalSec??5;document.getElementById('cloud-int').value=c.cloudSendIntervalSec??60}
+async function saveThermal(){var r=await fetch('/api/config/thermal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warnThreshold:parseFloat(document.getElementById('warn-th').value),stage2Threshold:parseFloat(document.getElementById('stage2-th').value),warnHumPct:parseFloat(document.getElementById('warn-hum-th').value),stage2HumPct:parseFloat(document.getElementById('stage2-hum-th').value),fan1BaselineOn:document.getElementById('fan1-baseline').value==='true',sensorReadIntervalSec:parseInt(document.getElementById('sensor-int').value),cloudSendIntervalSec:parseInt(document.getElementById('cloud-int').value)})});toast(r.ok?'Konfigurasi termal tersimpan':'Gagal menyimpan',r.ok)}
 async function loadSecurity(){var c=await fj('/api/config/security');document.getElementById('max-fail').value=c.maxFail??3;document.getElementById('lockout-sec').value=c.lockoutSecs??120;document.getElementById('unlock-sec').value=c.unlockSecs??5;document.getElementById('device-id').value=c.deviceId??''}
 async function saveSecurity(){var r=await fetch('/api/config/security',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({maxFail:parseInt(document.getElementById('max-fail').value),lockoutSecs:parseInt(document.getElementById('lockout-sec').value),unlockSecs:parseInt(document.getElementById('unlock-sec').value),deviceId:document.getElementById('device-id').value})});toast(r.ok?'Konfigurasi keamanan tersimpan':'Gagal menyimpan',r.ok)}
 async function loadUsers(){var d=await fj('/api/users');var b=document.getElementById('users-body');b.innerHTML='';(d.users||[]).forEach(function(u){var tr=document.createElement('tr');tr.innerHTML='<td>'+u.userId+'</td><td>'+(u.displayName||'-')+'</td><td><span style="color:'+(u.enabled?'var(--gn)':'var(--rd)')+';">&bull;</span> '+(u.enabled?'Ya':'Tidak')+'</td><td><button class="btn bd" onclick="deleteUser(\''+u.userId+'\')">Hapus</button></td>';b.appendChild(tr)})}
@@ -240,6 +244,7 @@ h1{font-size:1.35rem;font-weight:800;letter-spacing:-.02em;color:#fff}
 <div><div class="bt">Smart Server</div><h1>Dashboard <span class="grd">Cloud</span></h1></div>
 <div class="conn"><span class="dot" id="dot"></span><span id="ct">Menghubungkan...</span></div>
 </header>
+<!-- Bagian ini menampilkan ringkasan, grafik, status, dan tombol tindakan. -->
 <div class="alrt" id="alrt" style="display:none"><span id="ai"></span><span id="am"></span></div>
 <div class="metrics">
 <div class="mc t" id="c-temp">

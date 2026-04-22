@@ -2,8 +2,17 @@
 
 #include <Arduino.h>
 
+// Objek utama aplikasi. Semua alur sistem dikendalikan lewat instance ini.
 App app;
 
-void setup() { app.setup(); }
+// setup() hanya dipanggil sekali saat board baru menyala.
+void setup() {
+  // Serahkan semua persiapan ke objek App.
+  app.setup();
+}
 
-void loop() { app.loop(); }
+// loop() berjalan terus-menerus selama ESP32 hidup.
+void loop() {
+  // Serahkan semua kerja berulang ke objek App.
+  app.loop();
+}

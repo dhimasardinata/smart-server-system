@@ -1,10 +1,8 @@
 """
-Master Runner — Jalankan semua skenario tes sekaligus.
-Tiap skenario mengirim 1 request ke Google Apps Script.
+Jalankan semua contoh tes satu per satu.
 """
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -13,6 +11,7 @@ SCRIPTS = sorted(SCRIPT_DIR.glob("test_*.py"))
 passed = 0
 failed = 0
 
+# Setiap file test dijalankan sendiri supaya mudah melihat hasilnya.
 for script in SCRIPTS:
     if script.name == "run_all.py":
         continue

@@ -10,6 +10,7 @@ constexpr uint8_t SHT3X_ADDRESS = 0x44;
 constexpr unsigned long SENSOR_RECONNECT_INTERVAL_MS = 1000;
 
 void logI2cScan() {
+  // Pengecekan ini membantu saat sensor tidak ketemu.
   Serial.println(F("I2C scan result:"));
 
   uint8_t found = 0;
@@ -28,6 +29,7 @@ void logI2cScan() {
 }
 
 const char* sensorTypeName(SHTSensor::SHTSensorType type) {
+  // Nama sensor dipakai supaya hasilnya gampang dipahami.
   switch (type) {
     case SHTSensor::SHT2X:
       return "SHT2x";
@@ -42,6 +44,7 @@ const char* sensorTypeName(SHTSensor::SHTSensorType type) {
 SHT21Sensor::SHT21Sensor() : _sht(SHTSensor::SHT2X) {}
 
 bool SHT21Sensor::initialize(bool detailedLog, bool recoveredLog) {
+  // Pastikan sensor benar-benar ada sebelum dipakai.
   if (!I2CBus::probe(SHT21_ADDRESS)) {
     if (detailedLog) {
       Serial.println(F("SHT21 not detected at I2C address 0x40"));
@@ -78,6 +81,7 @@ bool SHT21Sensor::begin() {
 }
 
 bool SHT21Sensor::ensureReady() {
+  // Kalau sempat gagal, jangan dicoba terus-menerus.
   if (_ready) {
     return true;
   }
@@ -101,6 +105,7 @@ bool SHT21Sensor::ensureReady() {
 SensorData SHT21Sensor::read() {
   SensorData data{};
 
+  // Kalau belum siap, tandai hasil baca belum bisa dipakai.
   if (!ensureReady()) {
     data.valid = false;
     return data;
@@ -127,6 +132,7 @@ SensorData SHT21Sensor::read() {
 SHT3xSensor::SHT3xSensor() : _sht(SHTSensor::SHT3X) {}
 
 bool SHT3xSensor::initialize(bool detailedLog, bool recoveredLog) {
+  // Sensor ini disiapkan dengan cara yang sama, cuma letaknya berbeda.
   if (!I2CBus::probe(SHT3X_ADDRESS)) {
     if (detailedLog) {
       Serial.println(F("SHT3x not detected at I2C address 0x44"));
@@ -212,6 +218,7 @@ SensorData SHT3xSensor::read() {
 SensorManager::SensorManager() {}
 
 void SensorManager::begin() {
+  // Dua sensor disiapkan; kalau satu gagal, sistem tetap jalan.
   if (!_sht21.begin()) {
     Serial.println(F("SensorManager: SHT21 init failed"));
   }
@@ -221,6 +228,7 @@ void SensorManager::begin() {
 }
 
 void SensorManager::update() {
+  // Sensor tidak dibaca terlalu sering supaya kerja alat tetap enteng.
   if (millis() - _lastRead < _readIntervalMs) return;
   _lastRead = millis();
 

@@ -5,14 +5,19 @@
 #include <Arduino.h>
 #include <SHTSensor.h>
 
+// Satu sampel pembacaan suhu dan kelembapan.
 struct SensorData {
+  // Hasil suhu.
   float temperature;
+  // Hasil kelembapan.
   float humidity;
+  // Penanda hasil baca sah.
   bool valid;
 };
 
 class SHT21Sensor {
  public:
+  // Pengurus sensor SHT21.
   SHT21Sensor();
 
   [[nodiscard]] bool begin();
@@ -30,6 +35,7 @@ class SHT21Sensor {
 
 class SHT3xSensor {
  public:
+  // Pengurus sensor SHT3x.
   SHT3xSensor();
 
   [[nodiscard]] bool begin();
@@ -47,9 +53,11 @@ class SHT3xSensor {
 
 class SensorManager {
  public:
+  // Pengurus gabungan dua sensor.
   SensorManager();
 
   void begin();
+  // Interval baca bisa diubah dari menu konfigurasi.
   void setReadIntervalMs(unsigned long intervalMs) { _readIntervalMs = intervalMs; }
   void update();
   [[nodiscard]] SensorData getData() const;
