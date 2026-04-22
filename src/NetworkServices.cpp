@@ -79,6 +79,7 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
   _wifi = wifi;
   _sensors = sensors;
   _access = access;
+  // Inisialisasi ini menghubungkan semua pengurus utama ke layanan jaringan.
   OtaCoordinator::instance().begin();
 
   // Waktu lokal diselaraskan dari internet supaya catatan punya jam yang benar.
@@ -107,6 +108,7 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
                              bool warning, bool solenoidOn, bool alertOn,
                              const char* alertState) {
   // Nilai penting disalin dulu supaya halaman bisa membacanya aman.
+  // Copy kecil ini membuat web tidak membaca data yang sedang berubah.
   if (_pendingRestart && millis() >= _restartAtMs) {
     Serial.printf("Restarting after %s\n", _restartReason);
     delay(100);
@@ -141,6 +143,7 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
 
 void NetworkServices::logAccessEvent(const AccessEvent& event) {
   // Kejadian akses diubah jadi data yang siap dikirim.
+  // Format ini dipakai agar cloud dan dashboard membaca isi yang sama.
   AccessLogPayload payload;
   payload.timestamp = makeTimestampIso8601();
   payload.deviceId = _config->data.deviceId;
@@ -158,6 +161,7 @@ void NetworkServices::logAccessEvent(const AccessEvent& event) {
 void NetworkServices::enqueueTelemetryPayload(
     const TelemetryLogPayload& payload) {
   // Antrean dipakai supaya kirim data tidak mengganggu kerja utama.
+  // Data tetap disimpan dulu jika jaringan sedang sibuk.
   if (tryTakeQueueLock()) {
     _telemetryQueue.push_back(payload);
     if (_telemetryQueue.size() > MAX_QUEUE_SIZE)
@@ -171,6 +175,7 @@ void NetworkServices::enqueueTelemetryPayload(
 
 void NetworkServices::notifyUploader() {
   // Bagian pengirim dibangunkan kalau ada data baru.
+  // Jadi data tidak perlu menunggu loop utama terlalu lama.
   if (_asyncUploadEnabled && _uploadTask != nullptr) {
     xTaskNotifyGive(_uploadTask);
   }
@@ -214,6 +219,7 @@ void NetworkServices::uploadTaskEntry(void* context) {
 void NetworkServices::uploadTaskLoop() {
   for (;;) {
     // Bagian ini menunggu sampai ada data atau waktunya coba lagi.
+    // Kalau tidak ada tugas, pengirim hanya tidur sebentar.
     bool hasPending = false;
     bool shouldSend = false;
     bool forceFlush = false;
@@ -256,6 +262,7 @@ void NetworkServices::uploadTaskLoop() {
 
 void NetworkServices::enqueueAccessPayload(const AccessLogPayload& payload) {
   // Catatan akses juga masuk antrean terpisah dari data pantauan.
+  // Dengan begitu akses dan telemetry tidak saling menimpa.
   if (tryTakeQueueLock()) {
     _accessQueue.push_back(payload);
     if (_accessQueue.size() > MAX_QUEUE_SIZE)
@@ -279,6 +286,7 @@ void NetworkServices::backoff() {
 bool NetworkServices::sendOne() {
   if (!_googleSheets.isConfigured()) {
     // Kalau cloud belum disetel, jangan kirim dulu.
+    // Itu mencegah percobaan kirim yang pasti gagal.
     if (tryTakeQueueLock()) {
       _nextAttemptMs = millis() + 10000UL;
       _forceFlushRequested = false;
@@ -299,6 +307,7 @@ bool NetworkServices::sendOne() {
 
   if (!_accessQueue.empty()) {
     // Catatan akses diprioritaskan lebih dulu.
+    // Kejadian pintu dianggap lebih penting daripada data rutin.
     sendAccessPayload = true;
     accessPayload = _accessQueue.front();
   } else if (!_telemetryQueue.empty()) {
@@ -326,6 +335,7 @@ bool NetworkServices::sendOne() {
   }
 
   if (ok) {
+    // Kalau kirim berhasil, data paling depan dibuang dari antrean.
     if (sendAccessPayload) {
       // Kalau sukses, hapus catatan akses paling depan.
       if (!_accessQueue.empty()) {
@@ -418,6 +428,7 @@ void NetworkServices::enqueueTelemetry() {
 
 void NetworkServices::setupRoutes() {
   // Semua jalur web utama didaftarkan di sini.
+  // Bagian ini menentukan alamat mana yang bisa dibuka browser.
   _server.on("/", HTTP_GET,
              [this](AsyncWebServerRequest* request) { handleRoot(request); });
 
@@ -562,6 +573,7 @@ void NetworkServices::sendCaptiveRedirect(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
   // Halaman web membaca status terbaru dari sini.
+  // Ini adalah tempat dashboard minta data paling baru.
   size_t queueTelemetry = telemetryQueueSize();
   size_t queueAccess = accessQueueSize();
   unsigned long lastSendEpoch = _lastSendEpoch;
@@ -611,6 +623,8 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
   // Kirim setelan suhu dan kelembapan yang sedang aktif.
+  // Data ini dipakai oleh halaman pengaturan.
+  // Browser hanya membaca, tidak mengubah.
   JsonDocument doc;
   doc["warnThreshold"] = _config->data.warnThresholdC;
   doc["stage2Threshold"] = _config->data.stage2ThresholdC;
@@ -625,6 +639,8 @@ void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
 void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
                                              JsonVariant& json) {
   // Ambil setelan baru dari halaman web lalu simpan.
+  // Setelah disimpan, ESP32 akan memakai nilai baru itu.
+  // Perubahan ini langsung dipakai oleh loop utama.
   JsonObject obj = json.as<JsonObject>();
   if (obj["warnThreshold"].is<float>()) {
     _config->data.warnThresholdC = obj["warnThreshold"].as<float>();
@@ -656,6 +672,7 @@ void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
 
 void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
   // Kirim setelan keamanan agar halaman bisa menampilkannya.
+  // Termasuk batas salah PIN dan identitas alat.
   JsonDocument doc;
   doc["maxFail"] = _config->data.maxFailedAttempts;
   doc["lockoutSecs"] = _config->data.keypadLockoutSec;
@@ -667,6 +684,8 @@ void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
 void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
                                               JsonVariant& json) {
   // Setelan pintu dan identitas alat diperbarui dari halaman web.
+  // Perubahan ini disimpan ke file internal.
+  // Jadi pengaturan tidak hilang saat alat dimatikan.
   JsonObject obj = json.as<JsonObject>();
   if (obj["maxFail"].is<uint8_t>()) {
     _config->data.maxFailedAttempts =
@@ -689,6 +708,7 @@ void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
 
 void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
   // Daftar pengguna diubah menjadi data JSON untuk dikirim ke browser.
+  // Hanya pengguna yang benar-benar terisi yang ikut dikirim.
   JsonDocument doc;
   JsonArray users = doc["users"].to<JsonArray>();
   for (const auto& user : _config->data.users) {
@@ -706,6 +726,7 @@ void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
 void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
                                        JsonVariant& json) {
   // Simpan pengguna baru atau perbarui pengguna yang sudah ada.
+  // Fungsi ini dipakai dari form tambah atau ubah user.
   JsonObject obj = json.as<JsonObject>();
   const String userId = obj["userId"] | "";
   const String displayName = obj["displayName"] | "";
@@ -724,6 +745,7 @@ void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
 
 void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
   // Hapus satu pengguna dari daftar yang tersimpan.
+  // Penghapusan dilakukan lewat alamat pengguna yang dipilih.
   const String path = request->url();
   const String userId = path.substring(String("/api/users/").length());
   if (userId.length() == 0) {
@@ -750,6 +772,8 @@ void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
   // Tombol ini memaksa antrean langsung dikirim kalau syaratnya aman.
+  // Dipakai saat pengguna ingin data terkirim segera.
+  // Jika syarat belum cocok, fungsi ini tetap menolak.
   JsonDocument doc;
   if (!_wifi->isConnected()) {
     doc["success"] = false;
@@ -776,6 +800,7 @@ void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
   // Minta daftar jaringan WiFi di sekitar lalu kirim ke browser.
+  // Hasil ini membantu pengguna memilih jaringan yang benar.
   _wifi->requestScanRefresh();
   const auto networks = _wifi->getScannedNetworks();
   JsonDocument doc;
@@ -795,6 +820,7 @@ void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
 void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
                                         JsonVariant& json) {
   // Browser mengirim nama WiFi dan sandinya ke sini.
+  // Setelah disimpan, ESP32 mencoba menyambung.
   JsonObject obj = json.as<JsonObject>();
   const String ssid = obj["ssid"].as<String>();
   const String password = obj["password"].as<String>();
@@ -825,6 +851,7 @@ void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
 
 void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
   // Ini menghapus isi penyimpanan internal, jadi dipakai dengan sangat hati-hati.
+  // Semua setelan tersimpan akan hilang kalau fungsi ini dijalankan.
   if (!_config->formatFileSystem()) {
     request->send(500, "application/json",
                   "{\"error\":\"Failed to format flash\"}");
@@ -839,6 +866,7 @@ void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
 
 void NetworkServices::handleOtaUploadResponse(AsyncWebServerRequest* request) {
   // Setelah file dikirim, hasil akhirnya dilaporkan lewat fungsi ini.
+  // Di sini pengguna tahu upload berhasil atau gagal.
   FirmwareUploadContext* context = uploadContext(request);
   JsonDocument doc;
 
@@ -881,6 +909,8 @@ void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
                                            size_t index, uint8_t* data,
                                            size_t len, bool final) {
   // File firmware dikirim sedikit demi sedikit, bukan sekaligus.
+  // Ini lebih aman untuk memori kecil di ESP32.
+  // Setiap potongan disusun sampai file selesai.
   FirmwareUploadContext* context = uploadContext(request);
   if (index == 0 && context == nullptr) {
     context = new FirmwareUploadContext();
@@ -939,6 +969,7 @@ void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
   OtaCoordinator::instance().updateWebProgress(writtenBytes, context->totalBytes);
 
   if (!final) {
+    // Kalau file belum selesai, berhenti dulu sampai potongan berikutnya datang.
     return;
   }
 
@@ -957,6 +988,7 @@ void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
 
 void NetworkServices::scheduleRestart(const char* reason, unsigned long delayMs) {
   // Setelah tugas penting selesai, alat diberi waktu sebentar lalu restart.
+  // Restart dipakai supaya setelan baru mulai benar-benar aktif.
   _pendingRestart = true;
   _restartReason =
       (reason != nullptr && reason[0] != '\0') ? reason : "pending operation";

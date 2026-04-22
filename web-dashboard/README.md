@@ -3,6 +3,7 @@
 Folder ini berisi halaman web untuk melihat data dari Spreadsheet online.
 
 Halaman ini dipakai saat kamu ingin melihat data lewat browser, tanpa buka file program.
+Semua tampilan di sini sebenarnya mengambil data dari spreadsheet yang sama.
 
 Yang bisa dilihat di sini:
 
@@ -29,6 +30,12 @@ Yang bisa dilihat di sini:
 4. Pengguna bisa mengubah setelan.
 5. Perubahan dikirim kembali ke ESP32.
 
+## Kenapa Perlu Dipahami
+
+- supaya tahu data berasal dari mana
+- supaya tahu kenapa ID spreadsheet harus diisi
+- supaya tahu kenapa tombol refresh dan simpan penting
+
 ## Cara Pakai
 
 1. Buka `index.html` di browser.
@@ -51,3 +58,4 @@ Yang bisa dilihat di sini:
 - gaya tampilan ada di `styles.css`
 - perilaku halaman ada di `app.js`
 - jika browser gagal memuat, cek dulu koneksi ke ESP32
+- jika angka tidak berubah, biasanya data belum masuk dari spreadsheet

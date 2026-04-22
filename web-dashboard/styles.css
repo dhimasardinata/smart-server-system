@@ -1,4 +1,5 @@
 /* Variabel warna dan bentuk dipakai bersama agar tampilan konsisten. */
+/* Bagian ini seperti daftar bahan utama untuk seluruh halaman. */
 :root {
     --bg: #06080f;
     --surface: rgba(15, 20, 35, 0.7);
@@ -36,6 +37,7 @@ body {
 }
 
 /* Hiasan latar belakang yang lembut. */
+/* Tujuannya supaya halaman tidak terasa kosong atau datar. */
 .noise {
     position: fixed;
     inset: 0;
@@ -78,6 +80,7 @@ body {
 }
 
 /* Wadah utama halaman. */
+/* Semua panel diletakkan di dalam kotak besar ini. */
 .app {
     position: relative;
     z-index: 1;
@@ -90,6 +93,7 @@ body {
 }
 
 /* Kotak transparan untuk kartu dan panel. */
+/* Bentuk ini dipakai berulang supaya tampilan tetap satu gaya. */
 .glass {
     background: var(--surface);
     backdrop-filter: blur(20px) saturate(1.2);
@@ -110,6 +114,7 @@ body {
 }
 
 /* Bagian kepala halaman. */
+/* Bagian ini selalu terlihat pertama saat halaman dibuka. */
 .header {
     display: flex;
     justify-content: space-between;
@@ -154,6 +159,7 @@ body {
 }
 
 /* Saklar notifikasi. */
+/* Pengguna bisa mematikan atau menyalakan pesan cepat di sini. */
 .toggle {
     display: flex;
     align-items: center;
@@ -208,6 +214,7 @@ body {
 }
 
 /* Tombol umum. */
+/* Semua tombol memakai dasar yang sama agar seragam. */
 .btn {
     font-family: inherit;
     font-weight: 600;
@@ -251,6 +258,7 @@ body {
 .btn-primary:active { transform: translateY(0); }
 
 /* Kotak kecil untuk menampilkan status koneksi. */
+/* Ini memberi tanda apakah dashboard sedang tersambung atau tidak. */
 .status-chip {
     display: flex;
     align-items: center;

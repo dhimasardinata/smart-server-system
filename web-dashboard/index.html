@@ -13,6 +13,7 @@
 
 <body>
     <!-- Halaman ini adalah dashboard cloud untuk memantau data ESP32. -->
+    <!-- Isi halaman dibuat sederhana supaya mudah dibaca dari ponsel maupun komputer. -->
     <div class="noise" aria-hidden="true"></div>
     <div class="orb orb-1" aria-hidden="true"></div>
     <div class="orb orb-2" aria-hidden="true"></div>
@@ -41,6 +42,7 @@
         </header>
 
         <!-- Bagian ini dipakai untuk menghubungkan dashboard ke spreadsheet. -->
+        <!-- Tanpa ID spreadsheet, dashboard tidak punya sumber data. -->
         <section class="config glass" id="config-section">
             <div class="config-inner">
                 <div class="config-field">
@@ -61,6 +63,7 @@
             </div>
 
             <!-- Kartu ringkasan data utama. -->
+            <!-- Bagian ini menampilkan angka paling penting secara cepat. -->
             <section class="metrics">
                 <article class="metric-card glass" id="temp-card">
                     <div class="metric-header">
@@ -174,6 +177,7 @@
             </section>
 
             <!-- Grafik tren suhu dan kelembapan. -->
+            <!-- Grafik membantu melihat naik turun data dari waktu ke waktu. -->
             <section class="chart-panel glass">
                 <div class="panel-header">
                     <h2>Tren Telemetri</h2>
@@ -185,6 +189,7 @@
             </section>
 
             <!-- Tabel log telemetry. -->
+            <!-- Tabel ini menampilkan catatan data satu per satu. -->
             <section class="table-panel glass">
                 <div class="panel-header">
                     <h2>Log Telemetri</h2>
@@ -210,6 +215,7 @@
             </section>
 
             <!-- Tabel log akses. -->
+            <!-- Tabel ini dipakai untuk melihat percobaan masuk ke pintu. -->
             <section class="table-panel glass">
                 <div class="panel-header">
                     <h2>Log Akses</h2>

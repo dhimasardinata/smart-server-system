@@ -2,6 +2,7 @@
 
 namespace {
 // PIN admin bawaan kalau file belum ada.
+// Nilai ini sudah diubah dulu jadi bentuk aman.
 constexpr const char* DEFAULT_ADMIN_HASH =
     "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";  // 1234
 // ID perangkat bawaan.
@@ -10,6 +11,7 @@ constexpr const char* DEFAULT_DEVICE_ID = "esp32-smart-server-01";
 constexpr const char* DEFAULT_GSCRIPT_URL =
     "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec";
 
+// Nama lama dari file lama agar konfigurasi lama tetap terbaca.
 constexpr const char* LEGACY_WIFI_NETWORKS = "wifiNetworks";
 constexpr const char* LEGACY_USERS = "userCredentials";
 constexpr const char* LEGACY_SSID = "ssid";
@@ -33,6 +35,7 @@ JsonVariantConst getField(const TContainer& container, const char* primary,
                           const char* legacy, bool* usedLegacy = nullptr) {
   // Baca nama field baru dulu; kalau belum ada, coba nama lama agar config
   // lama tetap bisa dipakai.
+  // Dengan cara ini, file lama masih bisa dibaca tanpa rusak.
   JsonVariantConst value = container[primary];
   if (!value.isNull()) return value;
   if (legacy == nullptr) return JsonVariantConst();
@@ -45,6 +48,7 @@ JsonVariantConst getField(const TContainer& container, const char* primary,
 template <typename TValue, typename TContainer>
 bool readField(const TContainer& container, const char* primary,
                const char* legacy, TValue& out, bool* usedLegacy = nullptr) {
+  // Ambil satu nilai dari JSON ke variabel biasa.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.isNull()) return false;
   out = value.as<TValue>();
@@ -55,6 +59,7 @@ template <typename TContainer>
 bool readBoolField(const TContainer& container, const char* primary,
                    const char* legacy, bool& out,
                    bool* usedLegacy = nullptr) {
+  // Nilai benar/salah kadang disimpan sebagai teks atau angka.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.isNull()) return false;
 
@@ -88,6 +93,7 @@ template <typename TContainer>
 JsonArrayConst readArrayField(const TContainer& container, const char* primary,
                               const char* legacy,
                               bool* usedLegacy = nullptr) {
+  // Ambil data yang bentuknya daftar.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.is<JsonArrayConst>()) return value.as<JsonArrayConst>();
   return JsonArrayConst();
@@ -96,6 +102,7 @@ JsonArrayConst readArrayField(const TContainer& container, const char* primary,
 
 AppConfig::AppConfig() {
   // Nilai default ini dipakai saat konfigurasi belum ada atau rusak.
+  // Artinya, alat tetap punya patokan awal yang aman.
   for (auto& network : wifiNetworks) {
     // Kosongkan semua slot WiFi dulu.
     network.ssid = "";
@@ -141,6 +148,7 @@ ConfigManager::ConfigManager(const char* filename) : _filename(filename) {}
 
 bool ConfigManager::begin() {
   // LittleFS adalah "memori kecil" di ESP32 untuk menyimpan file konfigurasi.
+  // File di sini dipakai supaya setelan tidak hilang saat alat dimatikan.
   if (!LittleFS.begin(false)) {
     // Kalau gagal dibuka, coba format dulu.
     Serial.println(F("LittleFS mount failed, formatting"));
@@ -162,12 +170,14 @@ bool ConfigManager::begin() {
 
 bool ConfigManager::resetToDefaultsAndSave() {
   // Kembalikan semua pengaturan ke nilai bawaan lalu simpan.
+  // Ini dipakai kalau file lama rusak atau belum ada.
   data = AppConfig();
   return save();
 }
 
 bool ConfigManager::load() {
   // Buka file konfigurasi dari memori internal.
+  // Kalau file belum ada, default langsung dibuat.
   File file = LittleFS.open(_filename, "r");
   if (!file) {
     // Kalau file belum ada, buat dari default.
@@ -182,17 +192,20 @@ bool ConfigManager::load() {
 
   if (err) {
     // Kalau isi file rusak, balikan ke default.
+    // Lebih baik reset daripada meneruskan data yang salah.
     Serial.printf("Config parse error: %s. Resetting defaults.\n", err.c_str());
     return resetToDefaultsAndSave();
   }
 
   // Mulai dari nilai bawaan dulu.
+  // Lalu timpa dengan isi file kalau ada.
   data = AppConfig();
 
   bool recognized = false;
   bool migrated = false;
 
   // WiFi disimpan sebagai daftar, jadi kita baca satu per satu.
+  // Setiap slot dibaca hanya kalau memang ada isinya.
   size_t i = 0;
   for (JsonObjectConst net :
        readArrayField(doc, ConfigKeys::WIFI_NETWORKS, LEGACY_WIFI_NETWORKS,
@@ -213,6 +226,7 @@ bool ConfigManager::load() {
   }
 
   // User juga disimpan sebagai daftar dengan jumlah terbatas.
+  // Slot kosong diabaikan supaya daftar tetap rapi.
   i = 0;
   for (JsonObjectConst user :
        readArrayField(doc, ConfigKeys::USERS, LEGACY_USERS, &migrated)) {

@@ -11,6 +11,7 @@ constexpr unsigned long SENSOR_RECONNECT_INTERVAL_MS = 1000;
 
 void logI2cScan() {
   // Pengecekan ini membantu saat sensor tidak ketemu.
+  // Kalau tidak ada alat di jalur, hasil scan akan memperjelas masalahnya.
   Serial.println(F("I2C scan result:"));
 
   uint8_t found = 0;
@@ -30,6 +31,7 @@ void logI2cScan() {
 
 const char* sensorTypeName(SHTSensor::SHTSensorType type) {
   // Nama sensor dipakai supaya hasilnya gampang dipahami.
+  // Ini hanya untuk pesan di Serial Monitor.
   switch (type) {
     case SHTSensor::SHT2X:
       return "SHT2x";
@@ -45,6 +47,7 @@ SHT21Sensor::SHT21Sensor() : _sht(SHTSensor::SHT2X) {}
 
 bool SHT21Sensor::initialize(bool detailedLog, bool recoveredLog) {
   // Pastikan sensor benar-benar ada sebelum dipakai.
+  // Kalau tidak ada, jangan memaksa baca data.
   if (!I2CBus::probe(SHT21_ADDRESS)) {
     if (detailedLog) {
       Serial.println(F("SHT21 not detected at I2C address 0x40"));
@@ -64,6 +67,7 @@ bool SHT21Sensor::initialize(bool detailedLog, bool recoveredLog) {
   }
 
   _sht.setAccuracy(SHTSensor::SHT_ACCURACY_HIGH);
+  // Akurasi tinggi dipilih supaya bacaan lebih rapi.
   _ready = true;
 
   if (recoveredLog) {
@@ -76,12 +80,14 @@ bool SHT21Sensor::initialize(bool detailedLog, bool recoveredLog) {
 }
 
 bool SHT21Sensor::begin() {
+  // Jeda kecil memberi waktu alat sensor stabil setelah nyala.
   delay(20);
   return initialize(true, false);
 }
 
 bool SHT21Sensor::ensureReady() {
   // Kalau sempat gagal, jangan dicoba terus-menerus.
+  // Tunggu sebentar dulu supaya jalur I2C tidak sibuk.
   if (_ready) {
     return true;
   }
@@ -106,6 +112,7 @@ SensorData SHT21Sensor::read() {
   SensorData data{};
 
   // Kalau belum siap, tandai hasil baca belum bisa dipakai.
+  // Nilai kosong dipakai supaya bagian lain tahu data belum valid.
   if (!ensureReady()) {
     data.valid = false;
     return data;
@@ -133,6 +140,7 @@ SHT3xSensor::SHT3xSensor() : _sht(SHTSensor::SHT3X) {}
 
 bool SHT3xSensor::initialize(bool detailedLog, bool recoveredLog) {
   // Sensor ini disiapkan dengan cara yang sama, cuma letaknya berbeda.
+  // Alur bacanya tetap dibuat serupa agar gampang dipahami.
   if (!I2CBus::probe(SHT3X_ADDRESS)) {
     if (detailedLog) {
       Serial.println(F("SHT3x not detected at I2C address 0x44"));
@@ -164,11 +172,13 @@ bool SHT3xSensor::initialize(bool detailedLog, bool recoveredLog) {
 }
 
 bool SHT3xSensor::begin() {
+  // Jeda kecil memberi waktu alat sensor stabil setelah nyala.
   delay(20);
   return initialize(true, false);
 }
 
 bool SHT3xSensor::ensureReady() {
+  // Kalau sensor sudah siap, langsung pakai saja.
   if (_ready) {
     return true;
   }
@@ -192,6 +202,7 @@ bool SHT3xSensor::ensureReady() {
 SensorData SHT3xSensor::read() {
   SensorData data{};
 
+  // Sama seperti sensor suhu, baca hanya kalau siap.
   if (!ensureReady()) {
     data.valid = false;
     return data;
@@ -219,6 +230,7 @@ SensorManager::SensorManager() {}
 
 void SensorManager::begin() {
   // Dua sensor disiapkan; kalau satu gagal, sistem tetap jalan.
+  // Ini sengaja agar alat tidak langsung mati hanya karena satu sensor bermasalah.
   if (!_sht21.begin()) {
     Serial.println(F("SensorManager: SHT21 init failed"));
   }
@@ -229,6 +241,7 @@ void SensorManager::begin() {
 
 void SensorManager::update() {
   // Sensor tidak dibaca terlalu sering supaya kerja alat tetap enteng.
+  // Jeda baca disesuaikan dari setelan yang tersimpan.
   if (millis() - _lastRead < _readIntervalMs) return;
   _lastRead = millis();
 

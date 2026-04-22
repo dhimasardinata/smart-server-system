@@ -188,6 +188,7 @@ void App::setupOTA() {
     return;
 
   // Nama ini memudahkan perangkat ditemukan tanpa menghafal alamatnya.
+  // Ini dipakai oleh alat pembaruan bawaan ESP32.
   if (MDNS.begin(MDNS_HOSTNAME)) {
     Serial.printf("mDNS: %s.local\n", MDNS_HOSTNAME);
   } else {
@@ -232,6 +233,8 @@ void App::updateThermalAndFans(const SensorData& data) {
   // - kipas 1 ikut aktif kalau memang perlu
   // - kipas 2 baru aktif saat kondisi makin panas/lembap
   // Peringatan aktif kalau data valid dan melewati batas.
+  // Jadi dua kipas tidak selalu hidup bersamaan.
+  // Logika ini menjaga suhu tetap aman tanpa boros tenaga.
   _warning = data.valid && ((data.temperature > _config.data.warnThresholdC) || (data.humidity > _config.data.warnHumPct));
   // Kipas kedua menyala saat kondisi sudah lebih tinggi lagi.
   _fan2On = data.valid && ((data.temperature >= _config.data.stage2ThresholdC) || (data.humidity >= _config.data.stage2HumPct));
@@ -247,11 +250,13 @@ void App::updateThermalAndFans(const SensorData& data) {
 
 void App::requestUnlock() {
   if (_solenoidOn && _solenoidUnlockUntilMs > millis()) {
+    // Kalau pintu masih dalam masa buka, jangan buka lagi.
     Serial.println(F("Solenoid unlock request ignored while already active"));
     return;
   }
 
   // Kunci pintu dibuka sebentar lalu ditutup lagi otomatis.
+  // Waktu buka ditentukan dari setelan yang disimpan.
   _solenoidOn = true;
   // Catat kapan pintu harus dikunci lagi.
   _solenoidUnlockUntilMs = millis() + (_config.data.solenoidUnlockSec * 1000UL);
@@ -265,6 +270,7 @@ void App::startUnlockSession(const String& displayName) {
   // Minta pintu dibuka.
   requestUnlock();
   // Kalau PIN benar, minta pintu dibuka lalu hapus tanda permintaannya.
+  // Ini mencegah permintaan lama diproses dua kali.
   _access.consumeUnlockRequest();
   // Pindah ke tampilan sukses.
   _uiState = UIState::UNLOCK_OK;
@@ -276,6 +282,7 @@ void App::startUnlockSession(const String& displayName) {
 
 void App::updateSolenoid() {
   // Kalau waktu buka habis, kunci pintu lagi.
+  // Tujuannya supaya pintu tidak terbuka terus.
   if (_solenoidOn && _solenoidUnlockUntilMs > 0 &&
       millis() >= _solenoidUnlockUntilMs) {
     _solenoidOn = false;
@@ -331,6 +338,7 @@ const char* App::alertStateName(AlertState state) {
 void App::startBackgroundTask() {
   // Bagian belakang memisahkan urusan sambungan dari putaran utama.
   // Buat pengunci agar data tidak ditulis bersamaan.
+  // Kalau ini gagal, program tetap jalan dengan satu loop utama.
   _runtimeMutex = xSemaphoreCreateMutex();
   if (_runtimeMutex == nullptr) {
     Serial.println(
@@ -352,6 +360,7 @@ void App::startBackgroundTask() {
 
 void App::startOtaTask() {
   // Bagian pembaruan dipisah supaya tidak mengganggu pekerjaan lain.
+  // Ini mencegah proses upload firmware menahan tampilan utama.
   if (xTaskCreatePinnedToCore(App::otaTaskEntry, "app_ota",
                               OTA_TASK_STACK_WORDS, this, OTA_TASK_PRIORITY,
                               &_otaTask, OTA_TASK_CORE) != pdPASS) {
@@ -364,6 +373,8 @@ void App::startOtaTask() {
 
 void App::publishRuntimeSnapshot(const SensorData& data) {
   // Salinan singkat ini dipakai bagian lain tanpa menyentuh data utama.
+  // Jadi tampilan dan jaringan membaca data yang sama.
+  // Data utama tetap aman meski ada tugas lain berjalan.
   if (_runtimeMutex != nullptr &&
       xSemaphoreTake(_runtimeMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
     // Salin semua keadaan terbaru ke snapshot bersama.
@@ -410,6 +421,7 @@ void App::backgroundTaskLoop() {
   TickType_t lastWake = xTaskGetTickCount();
   for (;;) {
     // Selalu cek sambungan lalu kirim ringkasan data terbaru.
+    // Bagian ini berjalan terus selama alat menyala.
     // Perbarui status WiFi.
     _wifi.update();
 
@@ -428,6 +440,7 @@ void App::otaTaskLoop() {
   TickType_t lastWake = xTaskGetTickCount();
   for (;;) {
     // Kalau sambungan aktif dan pembaruan siap, baru layani unggah program.
+    // Kalau tidak, mode ini tidak perlu membuat jaringan terbuka.
     if (_wifi.isConnected() && OtaCoordinator::instance().canServeArduino()) {
       // Pastikan mode OTA sudah siap.
       setupOTA();
@@ -448,6 +461,8 @@ void App::enqueueAlert(AlertState state) {
     return;
 
   // Daftar alarm dipakai supaya tanda peringatan muncul berurutan.
+  // Kalau penuh, alarm paling lama digeser keluar.
+  // Dengan begini, pesan baru tetap sempat terlihat.
   if (_alertQueueCount >= ALERT_QUEUE_SIZE) {
     _alertQueueHead = (_alertQueueHead + 1) % ALERT_QUEUE_SIZE;
     --_alertQueueCount;
@@ -497,6 +512,8 @@ void App::stopAlert() {
 void App::updateThermalAlertState(bool warning, bool critical) {
   // Jika suhu atau lembap melewati batas, tanda bahaya ini jadi utama.
   // Ubah tingkat bahaya berdasarkan kondisi terbaru.
+  // Level lebih tinggi berarti keadaan lebih berbahaya.
+  // Kalau level turun, alarm juga ikut reda.
   const uint8_t newTier = critical ? 2 : (warning ? 1 : 0);
   if (newTier == _thermalTier)
     return;
@@ -521,6 +538,8 @@ void App::handleAccessAlert(const AccessEvent& event) {
     return;
 
   // Akses sukses menghentikan tanda lama yang belum sempat muncul.
+  // Akses gagal justru menambah tanda peringatan baru.
+  // Tujuannya supaya layar memberi tahu keadaan yang paling baru.
   switch (event.type) {
     case AccessEventType::AccessGranted:
       clearQueuedAlerts(true);
@@ -540,6 +559,7 @@ void App::handleAccessAlert(const AccessEvent& event) {
 void App::updateAlert() {
   if (hasContinuousThermalAlert()) {
     // Tanda bahaya tetap aktif selama kondisi buruk masih ada.
+    // Selama suhu masih tinggi, alarm tidak boleh padam.
     _alertState = _thermalTier >= 2 ? AlertState::ThermalCritical
                                     : AlertState::ThermalWarning;
     if (!_alertOn)
@@ -581,6 +601,7 @@ void App::updateDisplay(const SensorData& data) {
 
 void App::renderCurrentUiState() {
   // Tampilan dipilih sesuai keadaan terakhir di layar.
+  // Fungsi ini hanya menggambar ulang, bukan mengubah data.
   switch (_uiState) {
     case UIState::MONITORING:
       if (_wifi.isApMode()) {
@@ -692,6 +713,7 @@ void App::handleUIKey(char key) {
     return;
 
   // Catat waktu terakhir pengguna menekan tombol.
+  // Ini dipakai untuk tahu kapan menu terlalu lama diam.
   _uiIdleMs = millis();
 
   switch (_uiState) {
@@ -715,6 +737,7 @@ void App::handleUIKey(char key) {
     case UIState::PIN_ENTRY: {
       if (_access.isLockoutActive()) {
         // Saat terkunci, hanya boleh melihat sisa waktu.
+        // Input PIN baru tidak diterima sampai waktu habis.
         _display.showPinEntry(0, true, _access.lockoutRemainingSec());
         if (key == '*')
           // Tombol bintang bisa kembali ke tampilan utama.
@@ -934,6 +957,7 @@ void App::handleUIKey(char key) {
 
 void App::loop() {
   // Baca sensor secara berkala.
+  // Ini jadi sumber data utama untuk kipas dan layar.
   _sensors.update();
   // Perbarui status akses.
   _access.update();
@@ -941,6 +965,7 @@ void App::loop() {
   if (_uiState == UIState::STATUS_MESSAGE && _statusUntilMs > 0 &&
       millis() >= _statusUntilMs) {
     // Kalau pesan sementara habis waktunya, balik ke layar tujuan.
+    // Dengan begitu, layar tidak terjebak di pesan lama.
     _uiState = _statusReturnState;
     _statusUntilMs = 0;
     renderCurrentUiState();
@@ -950,11 +975,13 @@ void App::loop() {
   const char key = _access.getKey();
   if (_uiState != UIState::STATUS_MESSAGE) {
     // Tombol hanya diproses kalau bukan layar pesan sementara.
+    // Pesan sementara tidak boleh diganggu tombol lain.
     handleUIKey(key);
   }
 
   // Kalau ada permintaan buka pintu, jalankan.
   if (_access.consumeUnlockRequest() && _uiState != UIState::UNLOCK_OK) {
+    // Kalau ada permintaan buka pintu, jalankan sekali saja.
     requestUnlock();
   }
 
@@ -967,6 +994,7 @@ void App::loop() {
 
   AccessEvent event;
   // Proses semua kejadian akses yang menunggu.
+  // Semua catatan itu diteruskan ke layar dan jaringan.
   while (_access.popEvent(event)) {
     handleAccessAlert(event);
     _network.logAccessEvent(event);
@@ -999,6 +1027,7 @@ void App::loop() {
 
   if (!_backgroundTaskEnabled) {
     // Kalau belum ada tugas latar belakang, jalankan manual.
+    // Ini jadi jalur cadangan kalau tugas terpisah gagal dibuat.
     _wifi.update();
     _network.update(data, _fan1On, _fan2On, _warning, _solenoidOn, _alertOn,
                     alertStateName());
@@ -1007,6 +1036,7 @@ void App::loop() {
   if (_uiState == UIState::MONITORING) {
     if (_wifi.isApMode()) {
       // Saat AP mode, refresh layar secara berkala.
+      // Tujuannya supaya alamat setup tetap terlihat.
       if (millis() - _lastApDisplayRefreshMs >= AP_DISPLAY_REFRESH_MS) {
         _lastApDisplayRefreshMs = millis();
         renderCurrentUiState();
@@ -1020,6 +1050,7 @@ void App::loop() {
   if (_uiState == UIState::PIN_ENTRY && _access.isLockoutActive() &&
       millis() - _lastLockoutRefreshMs >= LOCKOUT_REFRESH_MS) {
     // Saat terkunci, perbarui hitung mundur secara berkala.
+    // Agar pengguna tahu sisa waktu yang tersisa.
     _lastLockoutRefreshMs = millis();
     renderCurrentUiState();
   }

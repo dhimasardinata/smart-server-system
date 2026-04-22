@@ -52,6 +52,7 @@ function doPost(e) {
 function handleRequest(e) {
   try {
     // Ambil semua parameter yang dikirim dari luar.
+    // Setelah itu, data dipilih sesuai lembar yang diminta.
     const params = readParams(e);
     // Cari lembar data yang diminta.
     const sheetName = requireSheet(params);
@@ -87,6 +88,7 @@ function handleRequest(e) {
 
 function readParams(e) {
   // Baca parameter dari query string dan body JSON kalau ada.
+  // Jadi kiriman dari browser maupun ESP32 bisa dipakai.
   const query = (e && e.parameter) || {};
   let body = {};
 
@@ -123,6 +125,7 @@ function ensureSheet(ss, sheetName) {
 
 function ensureHeaders(sheet, sheetName) {
   // Kalau judul kolom berubah atau belum ada, tulis ulang supaya rapi.
+  // Ini menjaga sheet tetap cocok dengan urutan data yang dikirim.
   const headers = sheetName === ACCESS_SHEET ? ACCESS_HEADERS : TELEMETRY_HEADERS;
   const range = sheet.getRange(1, 1, 1, headers.length);
   const current = range.getValues()[0];
@@ -139,6 +142,7 @@ function ensureHeaders(sheet, sheetName) {
 
 function buildTelemetryRow(params) {
   // Susun satu baris data pantauan sesuai urutan judul kolom.
+  // Urutan ini harus sama dengan header sheet.
   return [
     normalizeTimestamp(params.timestamp),
     requireString(params.device_id, "device_id"),
@@ -158,6 +162,7 @@ function buildTelemetryRow(params) {
 
 function buildAccessRow(params) {
   // Susun satu baris data akses sesuai urutan header sheet.
+  // Data ini dipakai untuk melihat siapa masuk atau ditolak.
   return [
     normalizeTimestamp(params.timestamp),
     requireString(params.device_id, "device_id"),
@@ -173,6 +178,7 @@ function buildAccessRow(params) {
 
 function normalizeTimestamp(value) {
   // Timestamp boleh kosong, angka Unix, atau string tanggal.
+  // Bentuk apa pun akan diubah ke format tanggal biasa.
   if (value === undefined || value === null || String(value).trim() === "") {
     // Kalau kosong, pakai waktu sekarang.
     return new Date();
@@ -193,6 +199,7 @@ function normalizeTimestamp(value) {
 
 function requireString(value, fieldName) {
   // Kolom teks wajib diisi agar catatan tidak kosong.
+  // Kalau kosong, kiriman dianggap salah.
   if (value === undefined || value === null || String(value).trim() === "") {
     throw new Error("missing field: " + fieldName);
   }
@@ -201,6 +208,7 @@ function requireString(value, fieldName) {
 
 function toNumber(value, fieldName) {
   // Field angka wajib valid.
+  // Kalau bukan angka, data ditolak supaya sheet tetap bersih.
   if (value === undefined || value === null || String(value).trim() === "") {
     throw new Error("missing field: " + fieldName);
   }
@@ -211,6 +219,7 @@ function toNumber(value, fieldName) {
 
 function toBooleanText(value) {
   // Boolean disimpan sebagai teks "true" / "false" supaya konsisten di sheet.
+  // Dengan begitu, data mudah dibaca lagi dari web.
   const raw = String(value || "").toLowerCase();
   if (raw === "true" || raw === "1" || raw === "on") return "true";
   if (raw === "false" || raw === "0" || raw === "off") return "false";

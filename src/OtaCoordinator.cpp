@@ -3,6 +3,7 @@
 namespace {
 const char* modeLabel(OtaCoordinator::Mode mode) {
   // Nama ini dipakai saat keadaan pembaruan ingin ditampilkan.
+  // Hasilnya dibuat sangat pendek supaya mudah dibaca.
   switch (mode) {
     case OtaCoordinator::Mode::Arduino:
       return "arduino";
@@ -22,6 +23,7 @@ OtaCoordinator& OtaCoordinator::instance() {
 
 void OtaCoordinator::begin() const {
   // Pengaman dibuat sekali supaya keadaannya aman dibaca banyak bagian.
+  // Kalau mutex sudah ada, tidak perlu dibuat ulang.
   if (_mutex != nullptr) {
     return;
   }
@@ -33,6 +35,7 @@ void OtaCoordinator::begin() const {
 
 bool OtaCoordinator::beginArduino() {
   // Dua cara pembaruan ini tidak boleh berjalan bersamaan.
+  // Kalau web OTA sedang aktif, kabel OTA harus menunggu.
   begin();
   return withLock([this]() {
     if (_mode == Mode::Web) {
@@ -52,6 +55,7 @@ void OtaCoordinator::updateArduinoProgress(unsigned int progress,
   withLock([this, progress, total]() {
     _mode = Mode::Arduino;
     _busy = true;
+    // Persentase dihitung dari nilai yang masuk dari proses upload.
     _progress =
         total > 0 ? static_cast<uint8_t>(min(100U, (progress * 100U) / total))
                   : 0;
@@ -63,6 +67,7 @@ void OtaCoordinator::updateArduinoProgress(unsigned int progress,
 void OtaCoordinator::finishArduino(bool success, const char* message) {
   begin();
   withLock([this, success, message]() {
+    // Setelah selesai, mode kembali diam.
     _mode = Mode::Idle;
     _busy = false;
     _progress = success ? 100 : 0;
@@ -77,6 +82,7 @@ void OtaCoordinator::finishArduino(bool success, const char* message) {
 
 bool OtaCoordinator::beginWeb(size_t totalBytes, const String& filename) {
   // Pembaruan lewat halaman punya aturan sendiri dan menyimpan nama file.
+  // Nama file ditampilkan supaya pengguna tahu apa yang sedang dipasang.
   begin();
   return withLock([this, totalBytes, &filename]() {
     if (_mode == Mode::Arduino || (_mode == Mode::Web && _busy)) {
@@ -97,6 +103,7 @@ void OtaCoordinator::updateWebProgress(size_t progressBytes, size_t totalBytes) 
   begin();
   withLock([this, progressBytes, totalBytes]() {
     // Hitung persentase kemajuan file yang sedang diterima.
+    // Nilai ini dipakai oleh halaman status OTA.
     _mode = Mode::Web;
     _busy = true;
     _progress = totalBytes > 0
@@ -111,6 +118,7 @@ void OtaCoordinator::updateWebProgress(size_t progressBytes, size_t totalBytes) 
 void OtaCoordinator::finishWeb(bool success, const String& message) {
   begin();
   withLock([this, success, &message]() {
+    // Hasil akhir disimpan agar halaman dan layar bisa menampilkannya.
     if (success) {
       _mode = Mode::Web;
       _busy = true;
@@ -127,6 +135,7 @@ void OtaCoordinator::finishWeb(bool success, const String& message) {
 
 bool OtaCoordinator::canServeArduino() const {
   // Kalau web OTA aktif, kabel OTA harus menunggu.
+  // Jadi hanya satu jalur yang boleh berjalan.
   return snapshot().mode != Mode::Web;
 }
 
@@ -139,6 +148,7 @@ OtaCoordinator::Snapshot OtaCoordinator::snapshot() const {
   begin();
   return withLock([this]() {
     // Salin keadaan terkini ke potret kecil.
+    // Snapshot ini aman dipakai tanpa memegang pengunci terlalu lama.
     Snapshot state;
     state.mode = _mode;
     state.busy = _busy;
@@ -150,6 +160,7 @@ OtaCoordinator::Snapshot OtaCoordinator::snapshot() const {
 
 String OtaCoordinator::modeName() const {
   // Ubah mode menjadi teks supaya mudah ditampilkan.
+  // Ini dipakai di layar, web, dan catatan.
   return String(modeLabel(snapshot().mode));
 }
 

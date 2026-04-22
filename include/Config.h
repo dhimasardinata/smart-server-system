@@ -9,7 +9,7 @@
 constexpr size_t MAX_WIFI_NETWORKS = 8;
 constexpr size_t MAX_USERS = 10;
 
-// Data satu jaringan yang disimpan di perangkat.
+// Data satu jaringan WiFi yang disimpan di perangkat.
 struct WiFiCredential {
   // Nama jaringan WiFi.
   String ssid;
@@ -19,19 +19,19 @@ struct WiFiCredential {
   bool enabled = true;
 };
 
-// Data satu pengguna yang boleh masuk.
+// Data satu pengguna yang boleh masuk ke sistem.
 struct UserCredential {
   // ID pengguna.
   String userId;
   // Nama yang ditampilkan di layar.
   String displayName;
-  // Hash dari PIN, bukan PIN mentah.
+  // Hasil pengaman dari PIN, bukan PIN mentah.
   String pinHash;
   // Penanda aktif atau tidak.
   bool enabled = true;
 };
 
-// Semua pengaturan utama disatukan di sini.
+// Semua pengaturan utama disatukan di satu tempat.
 struct AppConfig {
   // Daftar WiFi yang boleh dipakai.
   std::array<WiFiCredential, MAX_WIFI_NETWORKS> wifiNetworks;
@@ -68,6 +68,7 @@ struct AppConfig {
 
 namespace ConfigKeys {
 // Nama kunci yang dipakai saat menyimpan pengaturan.
+// Kunci ini membuat data tetap rapi saat ditulis ke file.
 constexpr const char* WIFI_NETWORKS = "wifi";
 constexpr const char* USERS = "users";
 constexpr const char* SSID = "s";
@@ -97,23 +98,37 @@ class ConfigManager {
 
   // Membaca dan menulis pengaturan dari penyimpanan internal.
   [[nodiscard]] bool begin();
+  // Ambil isi file dan masukkan ke struktur data.
   [[nodiscard]] bool load();
+  // Simpan isi struktur data ke file.
   bool save();
+  // Hapus isi penyimpanan lalu mulai dari awal.
   bool formatFileSystem();
 
+  // Tambah jaringan WiFi baru atau perbarui yang sudah ada.
   bool addWiFi(const String& ssid, const String& password);
+  // Hapus jaringan WiFi tertentu.
   bool removeWiFi(const String& ssid);
+  // Hitung jumlah WiFi yang aktif.
   [[nodiscard]] size_t getWiFiCount() const;
+  // Hapus semua WiFi yang tersimpan.
   void clearAllWiFi();
 
+  // Tambah pengguna baru atau perbarui yang sudah ada.
   bool upsertUser(const UserCredential& user);
+  // Hapus satu pengguna.
   bool removeUser(const String& userId);
+  // Hitung jumlah pengguna yang aktif.
   [[nodiscard]] size_t getUserCount() const;
+  // Cari pengguna berdasarkan ID.
   [[nodiscard]] const UserCredential* findUser(const String& userId) const;
 
+  // Isi setelan yang sedang aktif.
   AppConfig data;
 
  private:
+  // Nama file tempat setelan disimpan.
   const char* _filename;
+  // Kembalikan ke nilai awal lalu simpan.
   bool resetToDefaultsAndSave();
 };

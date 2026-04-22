@@ -9,6 +9,7 @@ Display::Display(uint8_t addr, uint8_t cols, uint8_t rows)
 
 bool Display::initialize(bool recoveredLog) {
   // Cek dulu apakah layar benar-benar ada di jalurnya.
+  // Kalau tidak ada, jangan lanjut karena semua tulisan akan gagal.
   if (!I2CBus::probe(_addr)) {
     // Kalau tidak ada, tandai belum siap.
     _ready = false;
@@ -30,6 +31,7 @@ bool Display::initialize(bool recoveredLog) {
 }
 
 bool Display::begin() {
+  // Saat awal nyala, layar langsung dicoba hidupkan.
   if (!initialize(false)) {
     Serial.println(F("LCD not found"));
     return false;
@@ -39,6 +41,7 @@ bool Display::begin() {
 
 void Display::scheduleRecovery(unsigned long delayMs) {
   // Tandai kapan layar boleh dicoba lagi.
+  // Ini dipakai kalau layar sempat terganggu setelah relay berubah.
   _scheduledRecoveryAtMs = millis() + delayMs;
   _recoveryScheduled = true;
 }
@@ -47,6 +50,7 @@ bool Display::maintainConnection() {
   const unsigned long now = millis();
 
   // Kalau ada perbaikan yang sudah dijadwalkan, jalankan saat waktunya tiba.
+  // Dengan cara ini, layar bisa pulih sendiri kalau sempat kacau.
   if (_recoveryScheduled &&
       static_cast<long>(now - _scheduledRecoveryAtMs) >= 0) {
     _recoveryScheduled = false;
@@ -100,6 +104,7 @@ bool Display::consumeRecovered() {
 void Display::clear() {
   if (!_ready) return;
   // Hapus semua tulisan di layar.
+  // Ini dipakai sebelum menampilkan halaman baru.
   _lcd.clear();
 }
 
@@ -114,6 +119,7 @@ void Display::clearRow(uint8_t row) {
 void Display::print(uint8_t col, uint8_t row, std::string_view text) {
   if (!_ready) return;
   // Posisikan kursor di kolom dan baris yang diminta.
+  // Setelah itu, tulis isi teks ke layar.
   _lcd.setCursor(col, row);
   // Tulis isi teks satu karakter per satu karakter.
   for (char c : text) _lcd.write(c);
@@ -122,6 +128,7 @@ void Display::print(uint8_t col, uint8_t row, std::string_view text) {
 void Display::printCenter(uint8_t row, std::string_view text) {
   if (!_ready) return;
   // Hitung posisi agar teks berada di tengah.
+  // Ini dipakai untuk judul atau pesan singkat.
   uint8_t col = (text.length() < _cols) ? (_cols - text.length()) / 2 : 0;
   // Pindahkan kursor ke posisi tengah.
   _lcd.setCursor(col, row);
@@ -227,11 +234,13 @@ void Display::showMainScreen() {
   if (!_ready) return;
 
   // Tulis baris atas yang bisa bergerak pelan.
+  // Bagian ini menampilkan waktu dan alamat jaringan.
   renderHeaderScroll();
 
   char row1[32];
   if (_sensorValid) {
     // Tampilkan suhu dan kelembapan kalau data valid.
+    // Kalau tidak valid, isi dibuat kosong agar tidak menyesatkan.
     snprintf(row1, sizeof(row1), "T:%4.1fC H:%4.1f%%", static_cast<double>(_temperature),
              static_cast<double>(_humidity));
   } else {
@@ -242,6 +251,7 @@ void Display::showMainScreen() {
 
   char row2[24];
   // Baris ini merangkum kondisi kipas dan tanda bahaya.
+  // Jadi orang bisa lihat keadaan alat hanya dari satu baris.
   snprintf(row2, sizeof(row2), "F1:%s F2:%s %s",
            _fan1On ? "ON " : "OFF", _fan2On ? "ON " : "OFF",
            _warning ? "WARN" : "NORM");

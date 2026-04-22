@@ -3,6 +3,7 @@
 Folder ini berisi skrip yang menerima data dari ESP32 lalu menulisnya ke spreadsheet.
 
 Bagian ini adalah jembatan antara ESP32 dan tabel online.
+Kalau bagian ini hilang atau salah, data dari alat tidak akan masuk ke spreadsheet.
 
 Yang dipakai ada dua lembar data:
 
@@ -20,6 +21,12 @@ Yang dipakai ada dua lembar data:
 2. Skrip menerima data.
 3. Skrip menaruh data ke baris spreadsheet yang sesuai.
 4. Kalau data tidak cocok, skrip menolak dan memberi pesan gagal.
+
+## Kenapa Perlu Dipahami
+
+- karena bagian ini menentukan data masuk ke tabel yang mana
+- karena nama kolom harus sama supaya data tidak tertukar
+- karena alamat skrip yang salah akan membuat pengiriman gagal
 
 ## Cara Menyiapkan
 
@@ -40,6 +47,7 @@ Yang dipakai ada dua lembar data:
 - kalau menambah kolom baru, ubah `Code.gs`
 - kalau ingin nama lembar data beda, sesuaikan di skrip dan di ESP32
 - kalau data tidak masuk, cek apakah alamat skrip masih benar
+- kalau data ditolak, biasanya ada kolom yang kosong atau salah bentuk
 
 ## Catatan
 

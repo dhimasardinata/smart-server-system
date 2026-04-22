@@ -57,6 +57,7 @@ let accessPage = 1;
 
 function initChart() {
     // Grafik dibuat sekali saat halaman mulai agar update berikutnya cepat.
+    // Setelah itu, yang berubah hanya isi datanya.
     const ctx = document.getElementById('trend-chart').getContext('2d');
 
     // Warna gradasi untuk garis suhu.
@@ -137,6 +138,7 @@ function initChart() {
 
 function loadConfig() {
     // Kalau pernah simpan ID spreadsheet, ambil lagi dari localStorage.
+    // Kalau belum ada, pakai ID bawaan sebagai contoh awal.
     const savedSheet = localStorage.getItem(CONFIG_KEY);
     el.sheetId.value = savedSheet || DEFAULT_SHEET_ID;
     el.notifToggle.checked = localStorage.getItem(NOTIF_KEY) === 'true';
@@ -145,6 +147,7 @@ function loadConfig() {
 
 function saveConfig() {
     // Ambil nilai spreadsheet dari kotak input.
+    // Nilai ini disimpan di browser, bukan di server.
     const value = (el.sheetId.value || '').trim();
     if (!value) return null;
     // Simpan pilihan ke browser agar tidak hilang saat halaman ditutup.
@@ -156,6 +159,7 @@ function saveConfig() {
 
 function showToast(title, message, type = 'warning') {
     // Toast adalah pop-up kecil untuk memberi informasi cepat.
+    // Ini dipakai supaya pengguna langsung tahu hasil aksi.
     if (!el.notifToggle.checked && type !== 'success') return;
 
     const toast = document.createElement('div');
@@ -211,6 +215,7 @@ async function fetchSheet(sheetId, sheetName) {
 
 function parseTelemetry(gviz) {
     // Data dari spreadsheet diubah menjadi format yang mudah dipakai halaman ini.
+    // Bagian ini menyesuaikan bentuk data mentah agar cocok dengan tabel.
     return (gviz?.table?.rows || []).map(r => {
         // Ambil kolom satu per satu dari baris spreadsheet.
         const c = r.c || [];
@@ -236,6 +241,7 @@ function parseTelemetry(gviz) {
 }
 
 function parseAccess(gviz) {
+    // Data akses juga dibaca dari lembar khususnya sendiri.
     return (gviz?.table?.rows || []).map(r => {
         // Ambil data akses dari kolom yang sesuai.
         const c = r.c || [];
@@ -291,6 +297,7 @@ function safeFixed(v) { return isFinite(v) ? v.toFixed(1) : '--'; }
 
 function renderPagination(container, totalItems, currentPage, onPageChange) {
     // Hitung jumlah halaman yang perlu ditampilkan.
+    // Tombol dibuat sedikit saja supaya tidak memenuhi layar.
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
 
@@ -320,6 +327,7 @@ function renderPagination(container, totalItems, currentPage, onPageChange) {
 function renderTelemetryTable(items, page) {
     // Tabel pantauan menampilkan data terbaru di bagian atas.
     // Urutkan dari data paling baru ke paling lama.
+    // Dengan begitu, data terkini selalu muncul duluan.
     const allSorted = items.slice().reverse();
     const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
     if (page > totalPages) page = totalPages;
@@ -353,6 +361,7 @@ function renderTelemetryTable(items, page) {
 function renderAccessTable(items, page) {
     // Tabel akses juga diurutkan dari data paling baru.
     // Urutkan dari data paling baru ke paling lama.
+    // Jadi kejadian terakhir langsung terlihat.
     const allSorted = items.slice().reverse();
     const totalPages = Math.max(1, Math.ceil(allSorted.length / PAGE_SIZE));
     if (page > totalPages) page = totalPages;
@@ -383,6 +392,7 @@ function renderAccessTable(items, page) {
 function updateAlertState(latest) {
     // Kalau data melewati ambang, tampilkan peringatan yang sesuai.
     // Bersihkan kelas lama dulu supaya tampilan tidak numpuk.
+    // Setelah itu, warna dan pesan diatur ulang dari awal.
     el.tempCard.classList.remove('card-warning', 'card-alarm');
     el.humCard.classList.remove('card-warning', 'card-alarm');
 
@@ -430,6 +440,7 @@ function updateAlertState(latest) {
 
 function updateSummary(telemetry, access) {
     // Ringkasan di layar utama diambil dari data terbaru saja.
+    // Kalau belum ada data, tampilannya sengaja dibuat kosong.
     if (telemetry.length === 0) {
         // Kalau belum ada data, tampilkan tanda kosong.
         el.tempValue.textContent = '--';
@@ -534,6 +545,7 @@ function updateSummary(telemetry, access) {
 async function refresh() {
     // Satu kali muat ulang mengambil data pantauan dan akses sekaligus.
     // Ambil ID spreadsheet dari browser.
+    // Ini membuat dashboard bisa dipakai tanpa setting ulang setiap saat.
     const sheetId = loadConfig();
     if (!sheetId) {
         setStatus(false, 'Spreadsheet belum dikonfigurasi');
