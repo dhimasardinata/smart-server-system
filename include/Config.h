@@ -29,6 +29,8 @@ struct AppConfig {
   uint32_t cloudSendIntervalSec = 60;
   float warnThresholdC = 27.0f;
   float stage2ThresholdC = 28.0f;
+  float warnHumPct = 65.0f;
+  float stage2HumPct = 75.0f;
   bool fan1BaselineOn = true;
   uint8_t maxFailedAttempts = 3;
   uint32_t keypadLockoutSec = 120;
@@ -52,6 +54,8 @@ constexpr const char* SENSOR_INTERVAL = "sensor_interval";
 constexpr const char* CLOUD_INTERVAL = "cloud_interval";
 constexpr const char* WARN_THRESHOLD = "th_warn";
 constexpr const char* STAGE2_THRESHOLD = "th_stage2";
+constexpr const char* WARN_HUM_THRESHOLD = "th_warn_h";
+constexpr const char* STAGE2_HUM_THRESHOLD = "th_stage2_h";
 constexpr const char* FAN1_BASELINE = "fan1_baseline";
 constexpr const char* MAX_FAILED = "max_failed";
 constexpr const char* KEYPAD_LOCKOUT = "lockout_secs";

@@ -389,6 +389,8 @@ void NetworkServices::enqueueTelemetry() {
   payload.wifiRssi = _wifi->getRSSI();
   payload.warnThreshold = _config->data.warnThresholdC;
   payload.stage2Threshold = _config->data.stage2ThresholdC;
+  payload.warnHumThreshold = _config->data.warnHumPct;
+  payload.stage2HumThreshold = _config->data.stage2HumPct;
   enqueueTelemetryPayload(payload);
 }
 
@@ -584,6 +586,8 @@ void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
   JsonDocument doc;
   doc["warnThreshold"] = _config->data.warnThresholdC;
   doc["stage2Threshold"] = _config->data.stage2ThresholdC;
+  doc["warnHumPct"] = _config->data.warnHumPct;
+  doc["stage2HumPct"] = _config->data.stage2HumPct;
   doc["fan1BaselineOn"] = _config->data.fan1BaselineOn;
   doc["sensorReadIntervalSec"] = _config->data.sensorReadIntervalSec;
   doc["cloudSendIntervalSec"] = _config->data.cloudSendIntervalSec;
@@ -598,6 +602,12 @@ void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
   }
   if (obj["stage2Threshold"].is<float>()) {
     _config->data.stage2ThresholdC = obj["stage2Threshold"].as<float>();
+  }
+  if (obj["warnHumPct"].is<float>()) {
+    _config->data.warnHumPct = obj["warnHumPct"].as<float>();
+  }
+  if (obj["stage2HumPct"].is<float>()) {
+    _config->data.stage2HumPct = obj["stage2HumPct"].as<float>();
   }
   if (obj["fan1BaselineOn"].is<bool>()) {
     _config->data.fan1BaselineOn = obj["fan1BaselineOn"].as<bool>();

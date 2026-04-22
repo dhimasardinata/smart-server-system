@@ -112,6 +112,8 @@ AppConfig::AppConfig() {
   cloudSendIntervalSec = 60;
   warnThresholdC = 27.0f;
   stage2ThresholdC = 28.0f;
+  warnHumPct = 65.0f;
+  stage2HumPct = 75.0f;
   fan1BaselineOn = true;
   maxFailedAttempts = 3;
   keypadLockoutSec = 120;
@@ -216,6 +218,12 @@ bool ConfigManager::load() {
   recognized |= readField(doc, ConfigKeys::STAGE2_THRESHOLD,
                           LEGACY_STAGE2_THRESHOLD, data.stage2ThresholdC,
                           &migrated);
+  recognized |= readField(doc, ConfigKeys::WARN_HUM_THRESHOLD,
+                          nullptr, data.warnHumPct,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::STAGE2_HUM_THRESHOLD,
+                          nullptr, data.stage2HumPct,
+                          &migrated);
   recognized |= readBoolField(doc, ConfigKeys::FAN1_BASELINE,
                               LEGACY_FAN1_BASELINE, data.fan1BaselineOn,
                               &migrated);
@@ -295,6 +303,8 @@ bool ConfigManager::save() {
   doc[ConfigKeys::CLOUD_INTERVAL] = data.cloudSendIntervalSec;
   doc[ConfigKeys::WARN_THRESHOLD] = data.warnThresholdC;
   doc[ConfigKeys::STAGE2_THRESHOLD] = data.stage2ThresholdC;
+  doc[ConfigKeys::WARN_HUM_THRESHOLD] = data.warnHumPct;
+  doc[ConfigKeys::STAGE2_HUM_THRESHOLD] = data.stage2HumPct;
   doc[ConfigKeys::FAN1_BASELINE] = data.fan1BaselineOn;
   doc[ConfigKeys::MAX_FAILED] = data.maxFailedAttempts;
   doc[ConfigKeys::KEYPAD_LOCKOUT] = data.keypadLockoutSec;

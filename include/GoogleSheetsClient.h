@@ -14,6 +14,8 @@ struct TelemetryLogPayload {
   int32_t wifiRssi = 0;
   float warnThreshold = 0.0f;
   float stage2Threshold = 0.0f;
+  float warnHumThreshold = 0.0f;
+  float stage2HumThreshold = 0.0f;
 };
 
 struct AccessLogPayload {

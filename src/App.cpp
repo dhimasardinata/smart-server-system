@@ -179,8 +179,8 @@ void App::setupOTA() {
 }
 
 void App::updateThermalAndFans(const SensorData& data) {
-  _warning = data.valid && (data.temperature > _config.data.warnThresholdC);
-  _fan2On = data.valid && (data.temperature >= _config.data.stage2ThresholdC);
+  _warning = data.valid && ((data.temperature > _config.data.warnThresholdC) || (data.humidity > _config.data.warnHumPct));
+  _fan2On = data.valid && ((data.temperature >= _config.data.stage2ThresholdC) || (data.humidity >= _config.data.stage2HumPct));
   _fan1On = _config.data.fan1BaselineOn || _warning || _fan2On;
 
   setRelay(Pins::RELAY_FAN1, _fan1On);

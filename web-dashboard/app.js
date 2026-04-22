@@ -36,6 +36,8 @@ const el = {
     toastContainer: document.getElementById('toast-container'),
     thWarn: document.getElementById('th-warn'),
     thAlarm: document.getElementById('th-alarm'),
+    thHumWarn: document.getElementById('th-hum-warn'),
+    thHumAlarm: document.getElementById('th-hum-alarm'),
     thStatus: document.getElementById('th-status'),
     alertBanner: document.getElementById('alert-banner'),
     alertIcon: document.getElementById('alert-icon'),
@@ -210,7 +212,9 @@ function parseTelemetry(gviz) {
             doorState: String(c[7]?.v || 'LOCKED'),
             wifiRssi: isFinite(rssi) ? rssi : 0,
             warnThreshold: c[9]?.v != null ? Number(c[9].v) : null,
-            stage2Threshold: c[10]?.v != null ? Number(c[10].v) : null
+            stage2Threshold: c[10]?.v != null ? Number(c[10].v) : null,
+            warnHumThreshold: c[11]?.v != null ? Number(c[11].v) : null,
+            stage2HumThreshold: c[12]?.v != null ? Number(c[12].v) : null
         };
     }).filter(x => x.timestamp);
 }
@@ -353,27 +357,45 @@ function renderAccessTable(items, page) {
 
 function updateAlertState(latest) {
     el.tempCard.classList.remove('card-warning', 'card-alarm');
+    el.humCard.classList.remove('card-warning', 'card-alarm');
 
-    const hasThresholds = latest.warnThreshold != null && isFinite(latest.warnThreshold);
+    const hasTempTh = latest.warnThreshold != null && isFinite(latest.warnThreshold);
+    const hasHumTh = latest.warnHumThreshold != null && isFinite(latest.warnHumThreshold);
     const isAlarm = latest.alarmState === 'ALARM';
-    const isWarning = hasThresholds && latest.temperature > latest.warnThreshold && !isAlarm;
-    const isOverStage2 = hasThresholds && latest.temperature > latest.stage2Threshold;
 
-    if (isAlarm || isOverStage2) {
-        el.tempCard.classList.add('card-alarm');
+    const tempWarning = hasTempTh && latest.temperature > latest.warnThreshold;
+    const tempCritical = hasTempTh && latest.temperature > latest.stage2Threshold;
+    const humWarning = hasHumTh && latest.humidity > latest.warnHumThreshold;
+    const humCritical = hasHumTh && latest.humidity > latest.stage2HumThreshold;
+
+    const anyCritical = isAlarm || tempCritical || humCritical;
+    const anyWarning = (tempWarning || humWarning) && !anyCritical;
+
+    if (tempCritical || (isAlarm && !humCritical)) el.tempCard.classList.add('card-alarm');
+    else if (tempWarning) el.tempCard.classList.add('card-warning');
+
+    if (humCritical) el.humCard.classList.add('card-alarm');
+    else if (humWarning) el.humCard.classList.add('card-warning');
+
+    if (anyCritical) {
+        const reasons = [];
+        if (tempCritical || isAlarm) reasons.push(`Suhu ${safeFixed(latest.temperature)}°C > ${latest.stage2Threshold || '--'}°C`);
+        if (humCritical) reasons.push(`Kelembapan ${safeFixed(latest.humidity)}% > ${latest.stage2HumThreshold || '--'}%`);
         el.alertBanner.style.display = 'flex';
         el.alertBanner.className = 'alert-banner alert-danger';
         el.alertIcon.textContent = '🚨';
-        el.alertTitle.textContent = 'ALARM — Suhu Kritis!';
-        el.alertMsg.textContent = `Suhu saat ini ${safeFixed(latest.temperature)}°C melebihi ambang alarm ${latest.stage2Threshold || '--'}°C. Kedua kipas aktif.`;
-        showToast('Alarm Suhu', `${safeFixed(latest.temperature)}°C melebihi ambang alarm!`, 'danger');
-    } else if (isWarning) {
-        el.tempCard.classList.add('card-warning');
+        el.alertTitle.textContent = 'ALARM — Kondisi Kritis!';
+        el.alertMsg.textContent = reasons.join(' · ') + '. Kedua kipas aktif.';
+        showToast('Alarm Lingkungan', reasons.join(', '), 'danger');
+    } else if (anyWarning) {
+        const reasons = [];
+        if (tempWarning) reasons.push(`Suhu ${safeFixed(latest.temperature)}°C > ${latest.warnThreshold}°C`);
+        if (humWarning) reasons.push(`Kelembapan ${safeFixed(latest.humidity)}% > ${latest.warnHumThreshold}%`);
         el.alertBanner.style.display = 'flex';
         el.alertBanner.className = 'alert-banner alert-warning';
         el.alertIcon.textContent = '⚠️';
-        el.alertTitle.textContent = 'Peringatan — Suhu Tinggi';
-        el.alertMsg.textContent = `Suhu saat ini ${safeFixed(latest.temperature)}°C melebihi ambang peringatan ${latest.warnThreshold}°C.`;
+        el.alertTitle.textContent = 'Peringatan — Kondisi Tinggi';
+        el.alertMsg.textContent = reasons.join(' · ');
     } else {
         el.alertBanner.style.display = 'none';
     }
@@ -403,11 +425,15 @@ function updateSummary(telemetry, access) {
 
     if (latest.warnThreshold != null && isFinite(latest.warnThreshold)) {
         el.tempThreshold.textContent = `Peringatan: ${latest.warnThreshold}°C · Alarm: ${latest.stage2Threshold}°C`;
-        el.humThreshold.textContent = `Ambang batas tersinkron dari perangkat`;
+        el.humThreshold.textContent = `Peringatan: ${latest.warnHumThreshold ?? '--'}% · Alarm: ${latest.stage2HumThreshold ?? '--'}%`;
         el.thWarn.textContent = `${latest.warnThreshold}°C`;
         el.thWarn.className = 'badge badge-warning';
         el.thAlarm.textContent = `${latest.stage2Threshold}°C`;
         el.thAlarm.className = 'badge badge-danger';
+        el.thHumWarn.textContent = `${latest.warnHumThreshold ?? '--'}%`;
+        el.thHumWarn.className = 'badge badge-warning';
+        el.thHumAlarm.textContent = `${latest.stage2HumThreshold ?? '--'}%`;
+        el.thHumAlarm.className = 'badge badge-danger';
         el.thStatus.textContent = 'Tersinkron';
         el.thStatus.className = 'badge badge-success';
     } else {
@@ -417,6 +443,10 @@ function updateSummary(telemetry, access) {
         el.thWarn.className = 'badge';
         el.thAlarm.textContent = '--';
         el.thAlarm.className = 'badge';
+        el.thHumWarn.textContent = '--';
+        el.thHumWarn.className = 'badge';
+        el.thHumAlarm.textContent = '--';
+        el.thHumAlarm.className = 'badge';
         el.thStatus.textContent = 'Menunggu sinkron';
         el.thStatus.className = 'badge badge-muted';
     }

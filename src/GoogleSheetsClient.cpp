@@ -83,6 +83,8 @@ bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
   url += "&wifi_rssi=" + String(payload.wifiRssi);
   url += "&warn_threshold=" + String(payload.warnThreshold, 1);
   url += "&stage2_threshold=" + String(payload.stage2Threshold, 1);
+  url += "&warn_hum_threshold=" + String(payload.warnHumThreshold, 1);
+  url += "&stage2_hum_threshold=" + String(payload.stage2HumThreshold, 1);
   return sendGetRequest(url);
 }
 

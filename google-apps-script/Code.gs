@@ -24,6 +24,8 @@ const TELEMETRY_HEADERS = [
   "wifi_rssi",
   "warn_threshold",
   "stage2_threshold",
+  "warn_hum_threshold",
+  "stage2_hum_threshold",
 ];
 
 const ACCESS_HEADERS = [
@@ -133,6 +135,8 @@ function buildTelemetryRow(params) {
     toNumber(params.wifi_rssi, "wifi_rssi"),
     toNumber(params.warn_threshold, "warn_threshold"),
     toNumber(params.stage2_threshold, "stage2_threshold"),
+    toNumber(params.warn_hum_threshold, "warn_hum_threshold"),
+    toNumber(params.stage2_hum_threshold, "stage2_hum_threshold"),
   ];
 }
 
