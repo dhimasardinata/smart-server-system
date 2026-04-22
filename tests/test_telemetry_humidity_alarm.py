@@ -1,4 +1,4 @@
-"""Skenario: Semua Kipas Mati — kondisi baseline off."""
+"""Skenario: Alarm Kelembapan — humidity melewati stage2 threshold."""
 import requests
 
 URL = "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec"
@@ -6,13 +6,13 @@ URL = "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGW
 params = {
     "sheet": "telemetry_logs",
     "device_id": "esp32-smart-server-01",
-    "temperature_c": 22.0,
-    "humidity_pct": 45.0,
-    "fan1_on": "false",
-    "fan2_on": "false",
+    "temperature_c": 26.0,
+    "humidity_pct": 81.0,
+    "fan1_on": "true",
+    "fan2_on": "true",
     "alarm_state": "NORMAL",
     "door_state": "LOCKED",
-    "wifi_rssi": -48,
+    "wifi_rssi": -47,
     "warn_threshold": 27.0,
     "stage2_threshold": 28.0,
     "warn_hum_threshold": 65.0,
@@ -20,5 +20,5 @@ params = {
 }
 
 resp = requests.get(URL, params=params)
-print(f"[KIPAS MATI] Status: {resp.status_code}")
+print(f"[HUMIDITY ALARM] Status: {resp.status_code}")
 print(resp.text)

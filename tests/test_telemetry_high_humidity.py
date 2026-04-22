@@ -15,6 +15,8 @@ params = {
     "wifi_rssi": -55,
     "warn_threshold": 27.0,
     "stage2_threshold": 28.0,
+    "warn_hum_threshold": 65.0,
+    "stage2_hum_threshold": 75.0,
 }
 
 resp = requests.get(URL, params=params)
