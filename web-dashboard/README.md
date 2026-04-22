@@ -1,20 +1,61 @@
-# Smart Server Cloud Dashboard
+# Web Dashboard
 
-Dashboard web untuk monitoring cloud dari Google Sheets dengan 2 worksheet:
+Folder ini berisi halaman web untuk melihat data dari Spreadsheet online.
 
-- `telemetry_logs`
-- `access_logs`
+Halaman ini dipakai saat kamu ingin melihat data lewat browser, tanpa buka file program.
+Semua tampilan di sini sebenarnya mengambil data dari spreadsheet yang sama.
 
-## Struktur kolom
+Yang bisa dilihat di sini:
 
-### `telemetry_logs`
-`timestamp, device_id, temperature_c, humidity_pct, fan1_on, fan2_on, alarm_state, door_state, wifi_rssi`
+- suhu
+- kelembapan
+- status kipas
+- status pintu
+- catatan akses
+- ambang batas yang dipakai ESP32
+- jaringan yang tersimpan
+- pengaturan alat
 
-### `access_logs`
-`timestamp, device_id, user_id, display_name, result, reason, failed_count, lockout_until, door_state`
+## Bagian File
 
-## Deploy
+- `index.html` = susunan halaman
+- `styles.css` = warna, jarak, dan tampilan
+- `app.js` = perilaku halaman
 
-1. Pastikan spreadsheet sudah public read.
-2. Deploy folder `web-dashboard` ke Netlify.
-3. Masukkan Spreadsheet ID pada dashboard.
+## Cara Kerja
+
+1. Browser membuka halaman.
+2. Halaman mengambil data dari ESP32.
+3. Data ditampilkan di layar.
+4. Pengguna bisa mengubah setelan.
+5. Perubahan dikirim kembali ke ESP32.
+
+## Kenapa Perlu Dipahami
+
+- supaya tahu data berasal dari mana
+- supaya tahu kenapa ID spreadsheet harus diisi
+- supaya tahu kenapa tombol refresh dan simpan penting
+
+## Cara Pakai
+
+1. Buka `index.html` di browser.
+2. Tunggu data muncul.
+3. Ubah setelan jika perlu.
+4. Simpan perubahan.
+5. Bila ada upload firmware, pilih file `.bin` terlebih dahulu.
+
+## Yang Perlu Dipahami
+
+- halaman ini tidak berdiri sendiri, tetapi berbicara dengan ESP32
+- kalau data tidak muncul, biasanya masalah ada di jaringan atau alamat tujuan
+- kalau tampilan berantakan, lihat `styles.css`
+- kalau tombol tidak bekerja, lihat `app.js`
+
+## Catatan
+
+- halaman ini membaca data dari Spreadsheet online
+- file utama ada di `index.html`
+- gaya tampilan ada di `styles.css`
+- perilaku halaman ada di `app.js`
+- jika browser gagal memuat, cek dulu koneksi ke ESP32
+- jika angka tidak berubah, biasanya data belum masuk dari spreadsheet

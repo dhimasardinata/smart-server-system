@@ -4,7 +4,11 @@
 #include <WiFiClientSecure.h>
 
 namespace {
+constexpr uint32_t TLS_TIMEOUT_MS = 5000;
+constexpr uint32_t HTTP_TIMEOUT_MS = 7000;
+
 String urlEncode(const String& value) {
+  // Ubah karakter aneh supaya aman dikirim.
   static const char* kHex = "0123456789ABCDEF";
   String out;
   out.reserve(value.length() * 3);
@@ -26,17 +30,20 @@ String urlEncode(const String& value) {
 }  // namespace
 
 void GoogleSheetsClient::begin(const String& scriptUrl) {
+  // Simpan alamat tujuan yang dipakai mengirim data.
   _scriptUrl = scriptUrl;
   _configured = scriptUrl.length() > 0 && scriptUrl.startsWith("https://");
 }
 
 bool GoogleSheetsClient::sendGetRequest(const String& url) {
+  // Pengiriman ini memakai cara sederhana lewat alamat yang sudah disimpan.
+  // Cara ini dipakai supaya data bisa masuk tanpa membuat jalur khusus lain.
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(20000);
+  client.setTimeout(TLS_TIMEOUT_MS);
 
   HTTPClient http;
-  http.setTimeout(30000);
+  http.setTimeout(HTTP_TIMEOUT_MS);
   http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
 
   if (!http.begin(client, url)) {
@@ -45,17 +52,24 @@ bool GoogleSheetsClient::sendGetRequest(const String& url) {
   }
 
   _lastHttpCode = http.GET();
-  const String response = http.getString();
+  String response;
+  if (_lastHttpCode != 200 && _lastHttpCode != 302) {
+    response = http.getString();
+  }
   http.end();
 
   if (_lastHttpCode != 200 && _lastHttpCode != 302) {
-    _lastError = "HTTP " + String(_lastHttpCode) + ": " + response;
+    _lastError = "HTTP " + String(_lastHttpCode);
+    if (response.length() > 0)
+      _lastError += ": " + response;
     return false;
   }
+  _lastError = "";
   return true;
 }
 
 bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
+  // Data pantauan diubah menjadi deretan pasangan nama dan nilai.
   if (!_configured) {
     _lastError = "Google Sheets not configured";
     return false;
@@ -74,10 +88,13 @@ bool GoogleSheetsClient::sendTelemetry(const TelemetryLogPayload& payload) {
   url += "&wifi_rssi=" + String(payload.wifiRssi);
   url += "&warn_threshold=" + String(payload.warnThreshold, 1);
   url += "&stage2_threshold=" + String(payload.stage2Threshold, 1);
+  url += "&warn_hum_threshold=" + String(payload.warnHumThreshold, 1);
+  url += "&stage2_hum_threshold=" + String(payload.stage2HumThreshold, 1);
   return sendGetRequest(url);
 }
 
 bool GoogleSheetsClient::sendAccess(const AccessLogPayload& payload) {
+  // Data akses juga dikirim dengan pola yang mirip.
   if (!_configured) {
     _lastError = "Google Sheets not configured";
     return false;

@@ -1,16 +1,75 @@
 #include "NetworkServices.h"
 
+#include "OtaCoordinator.h"
 #include "WebPage.h"
 
 #include <Esp.h>
+#include <Update.h>
 #include <time.h>
 
 namespace {
 constexpr uint16_t MAX_QUEUE_SIZE = 300;
 constexpr const char* LOCAL_MDNS_HOST = "monitor-server.local";
+constexpr unsigned long MIN_SEND_GAP_MS = 250;
+constexpr unsigned long DISCONNECTED_WAIT_MS = 1000;
+constexpr unsigned long IDLE_WAIT_MS = 2000;
+constexpr uint32_t UPLOAD_TASK_STACK_WORDS = 8192;
+constexpr UBaseType_t UPLOAD_TASK_PRIORITY = 1;
 
-bool isApiPath(const String& url) { return url.startsWith("/api/"); }
+struct FirmwareUploadContext {
+  bool accepted = false;
+  bool success = false;
+  bool failed = false;
+  int statusCode = 500;
+  size_t totalBytes = 0;
+  String filename;
+  String error;
+};
+
+bool isApiPath(const String& url) {
+  // Memisahkan jalur layanan dari halaman biasa.
+  return url.startsWith("/api/");
 }
+
+void sendJson(AsyncWebServerRequest* request, JsonDocument& doc) {
+  AsyncResponseStream* response =
+      request->beginResponseStream("application/json");
+  serializeJson(doc, *response);
+  request->send(response);
+}
+
+size_t requestFirmwareSize(AsyncWebServerRequest* request) {
+  // Ukuran file kadang dikirim lewat header supaya update tahu besar file.
+  if (request == nullptr || !request->hasHeader("X-Firmware-Size")) {
+    return UPDATE_SIZE_UNKNOWN;
+  }
+
+  const AsyncWebHeader* header = request->getHeader("X-Firmware-Size");
+  if (header == nullptr) {
+    return UPDATE_SIZE_UNKNOWN;
+  }
+
+  const unsigned long parsed = strtoul(header->value().c_str(), nullptr, 10);
+  return parsed > 0 ? parsed : UPDATE_SIZE_UNKNOWN;
+}
+
+FirmwareUploadContext* uploadContext(AsyncWebServerRequest* request) {
+  // Saat upload berjalan, data sementara disimpan di dalam request ini.
+  if (request == nullptr) {
+    return nullptr;
+  }
+  return static_cast<FirmwareUploadContext*>(request->_tempObject);
+}
+
+void clearUploadContext(AsyncWebServerRequest* request) {
+  // Bersihkan memori yang dipakai untuk upload setelah selesai.
+  FirmwareUploadContext* context = uploadContext(request);
+  delete context;
+  if (request != nullptr) {
+    request->_tempObject = nullptr;
+  }
+}
+}  // namespace
 
 NetworkServices::NetworkServices() : _server(80) {}
 
@@ -20,9 +79,25 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
   _wifi = wifi;
   _sensors = sensors;
   _access = access;
+  // Inisialisasi ini menghubungkan semua pengurus utama ke layanan jaringan.
+  OtaCoordinator::instance().begin();
 
+  // Waktu lokal diselaraskan dari internet supaya catatan punya jam yang benar.
   _googleSheets.begin(_config->data.googleScriptUrl);
   configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+
+  _queueMutex = xSemaphoreCreateMutex();
+  if (_queueMutex == nullptr) {
+    Serial.println(
+        F("NetworkServices: queue mutex init failed, using sync upload"));
+  } else if (xTaskCreate(NetworkServices::uploadTaskEntry, "cloud_upload",
+                         UPLOAD_TASK_STACK_WORDS, this, UPLOAD_TASK_PRIORITY,
+                         &_uploadTask) != pdPASS) {
+    Serial.println(
+        F("NetworkServices: upload task init failed, using sync upload"));
+  } else {
+    _asyncUploadEnabled = true;
+  }
 
   setupRoutes();
   setupWiFiRoutes();
@@ -32,8 +107,10 @@ void NetworkServices::begin(ConfigManager* config, WiFiManager* wifi,
 void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
                              bool warning, bool solenoidOn, bool alertOn,
                              const char* alertState) {
+  // Nilai penting disalin dulu supaya halaman bisa membacanya aman.
+  // Copy kecil ini membuat web tidak membaca data yang sedang berubah.
   if (_pendingRestart && millis() >= _restartAtMs) {
-    Serial.println(F("Restarting after flash format"));
+    Serial.printf("Restarting after %s\n", _restartReason);
     delay(100);
     ESP.restart();
     return;
@@ -47,18 +124,26 @@ void NetworkServices::update(const SensorData& data, bool fan1On, bool fan2On,
   _cachedAlertOn = alertOn;
   _cachedAlertState = alertState != nullptr ? alertState : "IDLE";
 
+  const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
+  if (otaState.busy) {
+    return;
+  }
+
   if (_wifi->isConnected()) {
     if (millis() - _lastTelemetryEnqueueMs >=
         (_config->data.cloudSendIntervalSec * 1000UL)) {
       _lastTelemetryEnqueueMs = millis();
       enqueueTelemetry();
-      _lastSendEpoch = static_cast<unsigned long>(time(nullptr));
     }
-    flushQueueTick();
+    if (!_asyncUploadEnabled) {
+      flushQueueTick();
+    }
   }
 }
 
 void NetworkServices::logAccessEvent(const AccessEvent& event) {
+  // Kejadian akses diubah jadi data yang siap dikirim.
+  // Format ini dipakai agar cloud dan dashboard membaca isi yang sama.
   AccessLogPayload payload;
   payload.timestamp = makeTimestampIso8601();
   payload.deviceId = _config->data.deviceId;
@@ -73,61 +158,235 @@ void NetworkServices::logAccessEvent(const AccessEvent& event) {
   enqueueAccessPayload(payload);
 }
 
-void NetworkServices::enqueueTelemetryPayload(const TelemetryLogPayload& payload) {
-  _telemetryQueue.push_back(payload);
-  if (_telemetryQueue.size() > MAX_QUEUE_SIZE) _telemetryQueue.pop_front();
+void NetworkServices::enqueueTelemetryPayload(
+    const TelemetryLogPayload& payload) {
+  // Antrean dipakai supaya kirim data tidak mengganggu kerja utama.
+  // Data tetap disimpan dulu jika jaringan sedang sibuk.
+  if (tryTakeQueueLock()) {
+    _telemetryQueue.push_back(payload);
+    if (_telemetryQueue.size() > MAX_QUEUE_SIZE)
+      _telemetryQueue.pop_front();
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+  notifyUploader();
+}
+
+void NetworkServices::notifyUploader() {
+  // Bagian pengirim dibangunkan kalau ada data baru.
+  // Jadi data tidak perlu menunggu loop utama terlalu lama.
+  if (_asyncUploadEnabled && _uploadTask != nullptr) {
+    xTaskNotifyGive(_uploadTask);
+  }
+}
+
+bool NetworkServices::tryTakeQueueLock(TickType_t waitTicks) {
+  // Kunci ini mencegah dua bagian program mengambil antrean bersamaan.
+  if (_queueMutex == nullptr) {
+    return true;
+  }
+  return xSemaphoreTake(_queueMutex, waitTicks) == pdTRUE;
+}
+
+size_t NetworkServices::telemetryQueueSize() {
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return _telemetryQueue.size();
+  }
+  const size_t size = _telemetryQueue.size();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  return size;
+}
+
+size_t NetworkServices::accessQueueSize() {
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return _accessQueue.size();
+  }
+  const size_t size = _accessQueue.size();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  return size;
+}
+
+void NetworkServices::uploadTaskEntry(void* context) {
+  // FreeRTOS memanggil fungsi ini sebagai pintu masuk tugas pengirim.
+  static_cast<NetworkServices*>(context)->uploadTaskLoop();
+}
+
+void NetworkServices::uploadTaskLoop() {
+  for (;;) {
+    // Bagian ini menunggu sampai ada data atau waktunya coba lagi.
+    // Kalau tidak ada tugas, pengirim hanya tidur sebentar.
+    bool hasPending = false;
+    bool shouldSend = false;
+    bool forceFlush = false;
+    unsigned long nextAttemptMs = 0;
+    const bool connected = (_wifi != nullptr) && _wifi->isConnected();
+
+    if (tryTakeQueueLock(pdMS_TO_TICKS(50))) {
+      hasPending = !_accessQueue.empty() || !_telemetryQueue.empty();
+      forceFlush = _forceFlushRequested;
+      nextAttemptMs = _nextAttemptMs;
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+
+    const unsigned long now = millis();
+    unsigned long waitMs = IDLE_WAIT_MS;
+    const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
+
+    if (otaState.busy) {
+      waitMs = IDLE_WAIT_MS;
+    } else if (!connected) {
+      waitMs = hasPending ? DISCONNECTED_WAIT_MS : IDLE_WAIT_MS;
+    } else if (!hasPending) {
+      waitMs = IDLE_WAIT_MS;
+    } else if (forceFlush || now >= nextAttemptMs) {
+      shouldSend = true;
+    } else {
+      waitMs = min(nextAttemptMs - now, DISCONNECTED_WAIT_MS);
+    }
+
+    if (shouldSend) {
+      sendOne();
+      continue;
+    }
+
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(max(1UL, waitMs)));
+  }
 }
 
 void NetworkServices::enqueueAccessPayload(const AccessLogPayload& payload) {
-  _accessQueue.push_back(payload);
-  if (_accessQueue.size() > MAX_QUEUE_SIZE) _accessQueue.pop_front();
+  // Catatan akses juga masuk antrean terpisah dari data pantauan.
+  // Dengan begitu akses dan telemetry tidak saling menimpa.
+  if (tryTakeQueueLock()) {
+    _accessQueue.push_back(payload);
+    if (_accessQueue.size() > MAX_QUEUE_SIZE)
+      _accessQueue.pop_front();
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+  notifyUploader();
 }
 
 void NetworkServices::backoff() {
+  // Kalau pengiriman gagal, tunda percobaan berikutnya supaya tidak berulang-ulang.
+  // Jeda dibuat makin panjang kalau kegagalan terjadi terus-menerus.
   _retryCount = min<uint8_t>(_retryCount + 1, 6);
   const unsigned long delayMs = 1000UL << _retryCount;
   _nextAttemptMs = millis() + min(delayMs, 60000UL);
+  _forceFlushRequested = false;
 }
 
 bool NetworkServices::sendOne() {
-  if (!_googleSheets.isConfigured()) return false;
+  if (!_googleSheets.isConfigured()) {
+    // Kalau cloud belum disetel, jangan kirim dulu.
+    // Itu mencegah percobaan kirim yang pasti gagal.
+    if (tryTakeQueueLock()) {
+      _nextAttemptMs = millis() + 10000UL;
+      _forceFlushRequested = false;
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+    return false;
+  }
 
-  bool ok = false;
+  bool sendAccessPayload = false;
+  AccessLogPayload accessPayload;
+  TelemetryLogPayload telemetryPayload;
+
+  if (!tryTakeQueueLock()) {
+    return false;
+  }
+
   if (!_accessQueue.empty()) {
-    ok = _googleSheets.sendAccess(_accessQueue.front());
-    if (ok) _accessQueue.pop_front();
+    // Catatan akses diprioritaskan lebih dulu.
+    // Kejadian pintu dianggap lebih penting daripada data rutin.
+    sendAccessPayload = true;
+    accessPayload = _accessQueue.front();
   } else if (!_telemetryQueue.empty()) {
-    ok = _googleSheets.sendTelemetry(_telemetryQueue.front());
-    if (ok) _telemetryQueue.pop_front();
+    // Kalau tidak ada akses, kirim telemetry.
+    telemetryPayload = _telemetryQueue.front();
   } else {
+    // Tidak ada data yang perlu dikirim.
+    _forceFlushRequested = false;
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
     return true;
   }
 
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+
+  const bool ok = sendAccessPayload
+                      ? _googleSheets.sendAccess(accessPayload)
+                      : _googleSheets.sendTelemetry(telemetryPayload);
+
+  if (!tryTakeQueueLock()) {
+    return ok;
+  }
+
   if (ok) {
+    // Kalau kirim berhasil, data paling depan dibuang dari antrean.
+    if (sendAccessPayload) {
+      // Kalau sukses, hapus catatan akses paling depan.
+      if (!_accessQueue.empty()) {
+        _accessQueue.pop_front();
+      }
+    } else if (!_telemetryQueue.empty()) {
+      // Kalau sukses, hapus telemetry paling depan.
+      _telemetryQueue.pop_front();
+    }
     _retryCount = 0;
-    _nextAttemptMs = millis();
+    _nextAttemptMs = millis() + MIN_SEND_GAP_MS;
+    const bool hasMore = !_accessQueue.empty() || !_telemetryQueue.empty();
+    _forceFlushRequested = _forceFlushRequested && hasMore;
+    _lastSendEpoch = static_cast<unsigned long>(time(nullptr));
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+    if (_asyncUploadEnabled && hasMore) {
+      notifyUploader();
+    }
     return true;
   }
 
   backoff();
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
   return false;
 }
 
 void NetworkServices::flushQueueTick() {
-  if (millis() < _nextAttemptMs) return;
-  sendOne();
-}
-
-bool NetworkServices::flushNow(uint16_t maxItems) {
-  bool allOk = true;
-  for (uint16_t i = 0; i < maxItems; ++i) {
-    if (_accessQueue.empty() && _telemetryQueue.empty()) break;
-    if (!sendOne()) {
-      allOk = false;
-      break;
-    }
+  // Jalur lama ini dipakai kalau pengirim latar belakang belum aktif.
+  if (_asyncUploadEnabled) {
+    notifyUploader();
+    return;
   }
-  return allOk;
+  if (!tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    return;
+  }
+  const bool hasPending = !_accessQueue.empty() || !_telemetryQueue.empty();
+  const bool shouldSend =
+      hasPending && (_forceFlushRequested || millis() >= _nextAttemptMs);
+  if (!hasPending) {
+    _forceFlushRequested = false;
+  }
+  if (_queueMutex != nullptr) {
+    xSemaphoreGive(_queueMutex);
+  }
+  if (shouldSend) {
+    sendOne();
+  }
 }
 
 String NetworkServices::doorState() const {
@@ -136,7 +395,8 @@ String NetworkServices::doorState() const {
 
 String NetworkServices::makeTimestampIso8601() const {
   const time_t now = time(nullptr);
-  if (now <= 0) return String(millis());
+  if (now <= 0)
+    return String(millis());
 
   struct tm timeinfo;
   localtime_r(&now, &timeinfo);
@@ -146,7 +406,8 @@ String NetworkServices::makeTimestampIso8601() const {
 }
 
 void NetworkServices::enqueueTelemetry() {
-  if (!_cachedData.valid) return;
+  if (!_cachedData.valid)
+    return;
 
   TelemetryLogPayload payload;
   payload.timestamp = makeTimestampIso8601();
@@ -160,10 +421,14 @@ void NetworkServices::enqueueTelemetry() {
   payload.wifiRssi = _wifi->getRSSI();
   payload.warnThreshold = _config->data.warnThresholdC;
   payload.stage2Threshold = _config->data.stage2ThresholdC;
+  payload.warnHumThreshold = _config->data.warnHumPct;
+  payload.stage2HumThreshold = _config->data.stage2HumPct;
   enqueueTelemetryPayload(payload);
 }
 
 void NetworkServices::setupRoutes() {
+  // Semua jalur web utama didaftarkan di sini.
+  // Bagian ini menentukan alamat mana yang bisa dibuka browser.
   _server.on("/", HTTP_GET,
              [this](AsyncWebServerRequest* request) { handleRoot(request); });
 
@@ -171,24 +436,33 @@ void NetworkServices::setupRoutes() {
     request->send(200, "text/html", WebPage::SETUP_HTML);
   });
 
-  _server.on("/generate_204", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/gen_204", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/hotspot-detect.html", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/connecttest.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/redirect", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/fwlink", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/canonical.html", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/success.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
-  _server.on("/ncsi.txt", HTTP_GET,
-             [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/gen_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on(
+      "/hotspot-detect.html", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on(
+      "/connecttest.txt", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/redirect", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/fwlink", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on(
+      "/canonical.html", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { sendCaptiveRedirect(request); });
+  _server.on("/success.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
+  _server.on("/ncsi.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    sendCaptiveRedirect(request);
+  });
 
   _server.on("/api/state", HTTP_GET, [this](AsyncWebServerRequest* request) {
     handleGetState(request);
@@ -231,10 +505,17 @@ void NetworkServices::setupRoutes() {
     handleSendNow(request);
   });
 
-  _server.on("/api/flash/format", HTTP_POST,
-             [this](AsyncWebServerRequest* request) {
-               handleFormatFlash(request);
-             });
+  _server.on(
+      "/api/flash/format", HTTP_POST,
+      [this](AsyncWebServerRequest* request) { handleFormatFlash(request); });
+
+  _server.on(
+      "/api/ota/upload", HTTP_POST,
+      [this](AsyncWebServerRequest* request) { handleOtaUploadResponse(request); },
+      [this](AsyncWebServerRequest* request, const String& filename,
+             size_t index, uint8_t* data, size_t len, bool final) {
+        handleOtaUploadChunk(request, filename, index, data, len, final);
+      });
 
   _server.onNotFound([this](AsyncWebServerRequest* request) {
     if (request->method() == HTTP_DELETE &&
@@ -254,10 +535,10 @@ void NetworkServices::setupRoutes() {
 }
 
 void NetworkServices::setupWiFiRoutes() {
-  _server.on("/api/wifi/scan", HTTP_GET,
-             [this](AsyncWebServerRequest* request) {
-               handleWiFiScan(request);
-             });
+  // Jalur khusus WiFi dipisah supaya kode lebih mudah dibaca.
+  _server.on(
+      "/api/wifi/scan", HTTP_GET,
+      [this](AsyncWebServerRequest* request) { handleWiFiScan(request); });
 
   AsyncCallbackJsonWebHandler* wifiHandler = new AsyncCallbackJsonWebHandler(
       "/api/wifi/connect",
@@ -269,8 +550,10 @@ void NetworkServices::setupWiFiRoutes() {
 
 void NetworkServices::handleRoot(AsyncWebServerRequest* request) {
   if (_wifi->isApMode()) {
+    // Saat AP mode, tampilkan halaman pengaturan.
     request->send(200, "text/html", WebPage::SETUP_HTML);
   } else {
+    // Saat normal, tampilkan dashboard.
     request->send(200, "text/html", WebPage::DASHBOARD_HTML);
   }
 }
@@ -282,14 +565,27 @@ void NetworkServices::sendCaptiveRedirect(AsyncWebServerRequest* request) {
   }
 
   AsyncWebServerResponse* response = request->beginResponse(302);
-  response->addHeader("Location", String("http://") + _wifi->getIP().toString() +
-                                      "/setup");
+  response->addHeader("Location",
+                      String("http://") + _wifi->getIP().toString() + "/setup");
   response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   request->send(response);
 }
 
 void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
+  // Halaman web membaca status terbaru dari sini.
+  // Ini adalah tempat dashboard minta data paling baru.
+  size_t queueTelemetry = telemetryQueueSize();
+  size_t queueAccess = accessQueueSize();
+  unsigned long lastSendEpoch = _lastSendEpoch;
+  if (tryTakeQueueLock(pdMS_TO_TICKS(20))) {
+    lastSendEpoch = _lastSendEpoch;
+    if (_queueMutex != nullptr) {
+      xSemaphoreGive(_queueMutex);
+    }
+  }
+
   JsonDocument doc;
+  const OtaCoordinator::Snapshot otaState = OtaCoordinator::instance().snapshot();
   doc["temperature"] = _cachedData.temperature;
   doc["humidity"] = _cachedData.humidity;
   doc["valid"] = _cachedData.valid;
@@ -304,8 +600,8 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
   doc["lockoutRemainingSec"] = _access->lockoutRemainingSec();
   doc["failedAttempts"] = _access->failedAttempts();
   doc["accessMessage"] = _access->lastMessage();
-  doc["queueTelemetry"] = _telemetryQueue.size();
-  doc["queueAccess"] = _accessQueue.size();
+  doc["queueTelemetry"] = queueTelemetry;
+  doc["queueAccess"] = queueAccess;
   doc["wifiConnected"] = _wifi->isConnected();
   doc["wifiState"] = _wifi->stateName();
   doc["apMode"] = _wifi->isApMode();
@@ -314,34 +610,49 @@ void NetworkServices::handleGetState(AsyncWebServerRequest* request) {
   doc["rssi"] = _wifi->getRSSI();
   doc["mdns"] = _wifi->isConnected() ? LOCAL_MDNS_HOST : "";
   doc["deviceId"] = _config->data.deviceId;
-  doc["lastSend"] = _lastSendEpoch;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  doc["lastSend"] = lastSendEpoch;
+  doc["scanPending"] = _wifi->isScanPending();
+  doc["scanAgeMs"] = _wifi->lastScanAgeMs();
+  doc["otaBusy"] = otaState.busy;
+  doc["otaMode"] = OtaCoordinator::instance().modeName();
+  doc["otaProgress"] = otaState.progress;
+  doc["otaMessage"] = otaState.message;
+  doc["restartPending"] = _pendingRestart;
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleGetThermalConfig(AsyncWebServerRequest* request) {
+  // Kirim setelan suhu dan kelembapan yang sedang aktif.
+  // Data ini dipakai oleh halaman pengaturan.
+  // Browser hanya membaca, tidak mengubah.
   JsonDocument doc;
   doc["warnThreshold"] = _config->data.warnThresholdC;
   doc["stage2Threshold"] = _config->data.stage2ThresholdC;
+  doc["warnHumPct"] = _config->data.warnHumPct;
+  doc["stage2HumPct"] = _config->data.stage2HumPct;
   doc["fan1BaselineOn"] = _config->data.fan1BaselineOn;
   doc["sensorReadIntervalSec"] = _config->data.sensorReadIntervalSec;
   doc["cloudSendIntervalSec"] = _config->data.cloudSendIntervalSec;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
                                              JsonVariant& json) {
+  // Ambil setelan baru dari halaman web lalu simpan.
+  // Setelah disimpan, ESP32 akan memakai nilai baru itu.
+  // Perubahan ini langsung dipakai oleh loop utama.
   JsonObject obj = json.as<JsonObject>();
   if (obj["warnThreshold"].is<float>()) {
     _config->data.warnThresholdC = obj["warnThreshold"].as<float>();
   }
   if (obj["stage2Threshold"].is<float>()) {
     _config->data.stage2ThresholdC = obj["stage2Threshold"].as<float>();
+  }
+  if (obj["warnHumPct"].is<float>()) {
+    _config->data.warnHumPct = obj["warnHumPct"].as<float>();
+  }
+  if (obj["stage2HumPct"].is<float>()) {
+    _config->data.stage2HumPct = obj["stage2HumPct"].as<float>();
   }
   if (obj["fan1BaselineOn"].is<bool>()) {
     _config->data.fan1BaselineOn = obj["fan1BaselineOn"].as<bool>();
@@ -360,19 +671,21 @@ void NetworkServices::handleSetThermalConfig(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleGetSecurityConfig(AsyncWebServerRequest* request) {
+  // Kirim setelan keamanan agar halaman bisa menampilkannya.
+  // Termasuk batas salah PIN dan identitas alat.
   JsonDocument doc;
   doc["maxFail"] = _config->data.maxFailedAttempts;
   doc["lockoutSecs"] = _config->data.keypadLockoutSec;
   doc["unlockSecs"] = _config->data.solenoidUnlockSec;
   doc["deviceId"] = _config->data.deviceId;
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
                                               JsonVariant& json) {
+  // Setelan pintu dan identitas alat diperbarui dari halaman web.
+  // Perubahan ini disimpan ke file internal.
+  // Jadi pengaturan tidak hilang saat alat dimatikan.
   JsonObject obj = json.as<JsonObject>();
   if (obj["maxFail"].is<uint8_t>()) {
     _config->data.maxFailedAttempts =
@@ -394,24 +707,26 @@ void NetworkServices::handleSetSecurityConfig(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleGetUsers(AsyncWebServerRequest* request) {
+  // Daftar pengguna diubah menjadi data JSON untuk dikirim ke browser.
+  // Hanya pengguna yang benar-benar terisi yang ikut dikirim.
   JsonDocument doc;
   JsonArray users = doc["users"].to<JsonArray>();
   for (const auto& user : _config->data.users) {
-    if (user.userId.length() == 0) continue;
+    if (user.userId.length() == 0)
+      continue;
     JsonObject item = users.add<JsonObject>();
     item["userId"] = user.userId;
     item["displayName"] = user.displayName;
     item["enabled"] = user.enabled;
   }
   doc["count"] = users.size();
-
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
                                        JsonVariant& json) {
+  // Simpan pengguna baru atau perbarui pengguna yang sudah ada.
+  // Fungsi ini dipakai dari form tambah atau ubah user.
   JsonObject obj = json.as<JsonObject>();
   const String userId = obj["userId"] | "";
   const String displayName = obj["displayName"] | "";
@@ -429,6 +744,8 @@ void NetworkServices::handleUpsertUser(AsyncWebServerRequest* request,
 }
 
 void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
+  // Hapus satu pengguna dari daftar yang tersimpan.
+  // Penghapusan dilakukan lewat alamat pengguna yang dipilih.
   const String path = request->url();
   const String userId = path.substring(String("/api/users/").length());
   if (userId.length() == 0) {
@@ -446,25 +763,46 @@ void NetworkServices::handleDeleteUser(AsyncWebServerRequest* request) {
     return;
   }
   if (!_config->removeUser(userId)) {
-    request->send(500, "application/json", "{\"error\":\"failed to delete user\"}");
+    request->send(500, "application/json",
+                  "{\"error\":\"failed to delete user\"}");
     return;
   }
   request->send(200, "application/json", "{\"success\":true}");
 }
 
 void NetworkServices::handleSendNow(AsyncWebServerRequest* request) {
-  const bool ok = flushNow(50);
+  // Tombol ini memaksa antrean langsung dikirim kalau syaratnya aman.
+  // Dipakai saat pengguna ingin data terkirim segera.
+  // Jika syarat belum cocok, fungsi ini tetap menolak.
   JsonDocument doc;
-  doc["success"] = ok;
-  doc["queueTelemetry"] = _telemetryQueue.size();
-  doc["queueAccess"] = _accessQueue.size();
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  if (!_wifi->isConnected()) {
+    doc["success"] = false;
+    doc["error"] = "WiFi not connected";
+  } else if (!_googleSheets.isConfigured()) {
+    doc["success"] = false;
+    doc["error"] = "Google Sheets not configured";
+  } else {
+    if (tryTakeQueueLock()) {
+      _forceFlushRequested = true;
+      _nextAttemptMs = millis();
+      if (_queueMutex != nullptr) {
+        xSemaphoreGive(_queueMutex);
+      }
+    }
+    notifyUploader();
+    doc["success"] = true;
+    doc["pending"] = telemetryQueueSize() > 0 || accessQueueSize() > 0;
+  }
+  doc["queueTelemetry"] = telemetryQueueSize();
+  doc["queueAccess"] = accessQueueSize();
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
-  auto networks = _wifi->scanNow();
+  // Minta daftar jaringan WiFi di sekitar lalu kirim ke browser.
+  // Hasil ini membantu pengguna memilih jaringan yang benar.
+  _wifi->requestScanRefresh();
+  const auto networks = _wifi->getScannedNetworks();
   JsonDocument doc;
   JsonArray arr = doc["networks"].to<JsonArray>();
   for (const auto& net : networks) {
@@ -474,13 +812,15 @@ void NetworkServices::handleWiFiScan(AsyncWebServerRequest* request) {
     obj["open"] = net.open;
     obj["saved"] = net.saved;
   }
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  doc["pending"] = _wifi->isScanPending();
+  doc["scanAgeMs"] = _wifi->lastScanAgeMs();
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
                                         JsonVariant& json) {
+  // Browser mengirim nama WiFi dan sandinya ke sini.
+  // Setelah disimpan, ESP32 mencoba menyambung.
   JsonObject obj = json.as<JsonObject>();
   const String ssid = obj["ssid"].as<String>();
   const String password = obj["password"].as<String>();
@@ -506,20 +846,151 @@ void NetworkServices::handleWiFiConnect(AsyncWebServerRequest* request,
     doc["success"] = false;
     doc["error"] = "Failed to start WiFi connection";
   }
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
+  sendJson(request, doc);
 }
 
 void NetworkServices::handleFormatFlash(AsyncWebServerRequest* request) {
+  // Ini menghapus isi penyimpanan internal, jadi dipakai dengan sangat hati-hati.
+  // Semua setelan tersimpan akan hilang kalau fungsi ini dijalankan.
   if (!_config->formatFileSystem()) {
     request->send(500, "application/json",
                   "{\"error\":\"Failed to format flash\"}");
     return;
   }
 
-  _pendingRestart = true;
-  _restartAtMs = millis() + 750;
+  scheduleRestart("flash format");
+  request->send(
+      200, "application/json",
+      "{\"success\":true,\"message\":\"Flash formatted. Restarting.\"}");
+}
+
+void NetworkServices::handleOtaUploadResponse(AsyncWebServerRequest* request) {
+  // Setelah file dikirim, hasil akhirnya dilaporkan lewat fungsi ini.
+  // Di sini pengguna tahu upload berhasil atau gagal.
+  FirmwareUploadContext* context = uploadContext(request);
+  JsonDocument doc;
+
+  if (context == nullptr) {
+    doc["success"] = false;
+    doc["error"] = "Tidak ada file firmware";
+    AsyncResponseStream* response =
+        request->beginResponseStream("application/json");
+    response->setCode(400);
+    serializeJson(doc, *response);
+    request->send(response);
+    return;
+  }
+
+  if (context->failed || !context->success) {
+    doc["success"] = false;
+    doc["error"] =
+        context->error.length() > 0 ? context->error : "Upload firmware gagal";
+    AsyncResponseStream* response =
+        request->beginResponseStream("application/json");
+    response->setCode(context->statusCode);
+    serializeJson(doc, *response);
+    request->send(response);
+    clearUploadContext(request);
+    return;
+  }
+
+  scheduleRestart("web ota", 1800);
+  doc["success"] = true;
+  doc["message"] = "Firmware diterima. ESP akan restart.";
+  doc["filename"] = context->filename;
+  doc["bytes"] = context->totalBytes;
   request->send(200, "application/json",
-                "{\"success\":true,\"message\":\"Flash formatted. Restarting.\"}");
+                "{\"success\":true,\"message\":\"Firmware diterima. ESP akan restart.\"}");
+  clearUploadContext(request);
+}
+
+void NetworkServices::handleOtaUploadChunk(AsyncWebServerRequest* request,
+                                           const String& filename,
+                                           size_t index, uint8_t* data,
+                                           size_t len, bool final) {
+  // File firmware dikirim sedikit demi sedikit, bukan sekaligus.
+  // Ini lebih aman untuk memori kecil di ESP32.
+  // Setiap potongan disusun sampai file selesai.
+  FirmwareUploadContext* context = uploadContext(request);
+  if (index == 0 && context == nullptr) {
+    context = new FirmwareUploadContext();
+    request->_tempObject = context;
+  }
+  if (context == nullptr || context->failed) {
+    return;
+  }
+
+  if (index == 0) {
+    context->filename = filename.length() > 0 ? filename : "firmware.bin";
+    context->totalBytes = requestFirmwareSize(request);
+
+    if (!context->filename.endsWith(".bin")) {
+      context->failed = true;
+      context->statusCode = 400;
+      context->error = "File firmware harus berekstensi .bin";
+      OtaCoordinator::instance().finishWeb(false, context->error);
+      return;
+    }
+
+    if (!OtaCoordinator::instance().beginWeb(context->totalBytes,
+                                             context->filename)) {
+      context->failed = true;
+      context->statusCode = 409;
+      context->error = "OTA lain sedang berjalan";
+      return;
+    }
+
+    if (!Update.begin(context->totalBytes, U_FLASH)) {
+      context->failed = true;
+      context->statusCode = 500;
+      context->error = String("Gagal memulai update: ") + Update.errorString();
+      OtaCoordinator::instance().finishWeb(false, context->error);
+      Update.abort();
+      return;
+    }
+
+    context->accepted = true;
+  }
+
+  if (!context->accepted) {
+    return;
+  }
+
+  if (len > 0 && Update.write(data, len) != len) {
+    context->failed = true;
+    context->statusCode = 500;
+    context->error = String("Gagal menulis firmware: ") + Update.errorString();
+    OtaCoordinator::instance().finishWeb(false, context->error);
+    Update.abort();
+    return;
+  }
+
+  const size_t writtenBytes = index + len;
+  OtaCoordinator::instance().updateWebProgress(writtenBytes, context->totalBytes);
+
+  if (!final) {
+    // Kalau file belum selesai, berhenti dulu sampai potongan berikutnya datang.
+    return;
+  }
+
+  if (!Update.end(true)) {
+    context->failed = true;
+    context->statusCode = 500;
+    context->error = String("Gagal menyelesaikan update: ") + Update.errorString();
+    OtaCoordinator::instance().finishWeb(false, context->error);
+    Update.abort();
+    return;
+  }
+
+  context->success = true;
+  OtaCoordinator::instance().finishWeb(true, "Web OTA selesai. Menunggu restart");
+}
+
+void NetworkServices::scheduleRestart(const char* reason, unsigned long delayMs) {
+  // Setelah tugas penting selesai, alat diberi waktu sebentar lalu restart.
+  // Restart dipakai supaya setelan baru mulai benar-benar aktif.
+  _pendingRestart = true;
+  _restartReason =
+      (reason != nullptr && reason[0] != '\0') ? reason : "pending operation";
+  _restartAtMs = millis() + delayMs;
 }

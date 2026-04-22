@@ -1,58 +1,57 @@
-# Google Apps Script Setup
+# Google Apps Script
 
-Use this script to receive telemetry/access logs from ESP32 and append to two sheets:
+Folder ini berisi skrip yang menerima data dari ESP32 lalu menulisnya ke spreadsheet.
+
+Bagian ini adalah jembatan antara ESP32 dan tabel online.
+Kalau bagian ini hilang atau salah, data dari alat tidak akan masuk ke spreadsheet.
+
+Yang dipakai ada dua lembar data:
 
 - `telemetry_logs`
 - `access_logs`
 
-## 1) Prepare Spreadsheet
+## Apa Bedanya Dua Lembar Ini
 
-1. Create a new Google Spreadsheet.
-2. (Optional) Create sheets manually named:
-   - `telemetry_logs`
-   - `access_logs`
-3. Open the spreadsheet URL.
+- `telemetry_logs` berisi data suhu, kelembapan, kipas, dan status alat
+- `access_logs` berisi data orang masuk, PIN, hasil akses, dan alasan
 
-## 2) Create Apps Script
+## Cara Kerja
 
-1. In Spreadsheet: `Extensions` -> `Apps Script`.
-2. Replace default code with content from `Code.gs`.
-3. Save project.
+1. ESP32 mengirim data.
+2. Skrip menerima data.
+3. Skrip menaruh data ke baris spreadsheet yang sesuai.
+4. Kalau data tidak cocok, skrip menolak dan memberi pesan gagal.
 
-## 3) Deploy Web App
+## Kenapa Perlu Dipahami
 
-1. `Deploy` -> `New deployment`.
-2. Type: `Web app`.
-3. Execute as: `Me`.
-4. Who has access: `Anyone`.
-5. Click `Deploy`.
-6. Copy the Web App URL.
+- karena bagian ini menentukan data masuk ke tabel yang mana
+- karena nama kolom harus sama supaya data tidak tertukar
+- karena alamat skrip yang salah akan membuat pengiriman gagal
 
-## 4) Configure ESP32
+## Cara Menyiapkan
 
-Set the Web App URL in local setup page (`/setup`):
+1. Buat spreadsheet baru.
+2. Buka `Extensions` -> `Apps Script`.
+3. Ganti isi skrip dengan `Code.gs`.
+4. Simpan lalu sebarkan sebagai aplikasi web.
+5. Masukkan alamat skrip itu ke pengaturan ESP32.
 
-- `googleScriptUrl`
+## File Penting
 
-Firmware will send:
+- `Code.gs` = skrip utama
+- `.clasp.json` = catatan sambungan ke proyek Google
+- `.claspignore` = daftar file yang tidak perlu ikut dikirim
 
-- Telemetry: `sheet=telemetry_logs`
-- Access: `sheet=access_logs`
+## Saat Mengubah Isi
 
-Strict mode:
+- kalau menambah kolom baru, ubah `Code.gs`
+- kalau ingin nama lembar data beda, sesuaikan di skrip dan di ESP32
+- kalau data tidak masuk, cek apakah alamat skrip masih benar
+- kalau data ditolak, biasanya ada kolom yang kosong atau salah bentuk
 
-- `sheet` is mandatory and must be valid.
-- Canonical snake_case fields only.
-- Missing/invalid field -> request rejected (`ok:false`).
+## Catatan
 
-## 5) Test quickly in browser
-
-Replace `<WEB_APP_URL>` with your deployment URL:
-
-```text
-<WEB_APP_URL>?sheet=telemetry_logs&timestamp=2026-03-01T10:00:00&device_id=esp32-smart-server-01&temperature_c=28.1&humidity_pct=64.3&fan1_on=true&fan2_on=false&alarm_state=NORMAL&door_state=LOCKED&wifi_rssi=-54
-```
-
-```text
-<WEB_APP_URL>?sheet=access_logs&timestamp=2026-03-01T10:00:00&device_id=esp32-smart-server-01&user_id=admin&display_name=Administrator&result=GRANTED&reason=VALID_PIN&failed_count=0&lockout_until=0&door_state=UNLOCKING
-```
+- skrip ini menerima data dari ESP32
+- nama kolom sudah diatur di `Code.gs`
+- kalau ada data yang tidak lengkap, skrip akan menolak dan memberi pesan gagal
+- kalau spreadsheet belum menerima data, cek izin akses dan alamat skrip

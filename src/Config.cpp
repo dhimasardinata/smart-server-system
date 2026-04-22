@@ -1,12 +1,17 @@
 #include "Config.h"
 
 namespace {
+// PIN admin bawaan kalau file belum ada.
+// Nilai ini sudah diubah dulu jadi bentuk aman.
 constexpr const char* DEFAULT_ADMIN_HASH =
     "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";  // 1234
+// ID perangkat bawaan.
 constexpr const char* DEFAULT_DEVICE_ID = "esp32-smart-server-01";
+// Alamat bawaan untuk skrip Google Apps Script.
 constexpr const char* DEFAULT_GSCRIPT_URL =
     "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec";
 
+// Nama lama dari file lama agar konfigurasi lama tetap terbaca.
 constexpr const char* LEGACY_WIFI_NETWORKS = "wifiNetworks";
 constexpr const char* LEGACY_USERS = "userCredentials";
 constexpr const char* LEGACY_SSID = "ssid";
@@ -28,6 +33,9 @@ constexpr const char* LEGACY_DEVICE_ID = "deviceId";
 template <typename TContainer>
 JsonVariantConst getField(const TContainer& container, const char* primary,
                           const char* legacy, bool* usedLegacy = nullptr) {
+  // Baca nama field baru dulu; kalau belum ada, coba nama lama agar config
+  // lama tetap bisa dipakai.
+  // Dengan cara ini, file lama masih bisa dibaca tanpa rusak.
   JsonVariantConst value = container[primary];
   if (!value.isNull()) return value;
   if (legacy == nullptr) return JsonVariantConst();
@@ -40,6 +48,7 @@ JsonVariantConst getField(const TContainer& container, const char* primary,
 template <typename TValue, typename TContainer>
 bool readField(const TContainer& container, const char* primary,
                const char* legacy, TValue& out, bool* usedLegacy = nullptr) {
+  // Ambil satu nilai dari JSON ke variabel biasa.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.isNull()) return false;
   out = value.as<TValue>();
@@ -50,6 +59,7 @@ template <typename TContainer>
 bool readBoolField(const TContainer& container, const char* primary,
                    const char* legacy, bool& out,
                    bool* usedLegacy = nullptr) {
+  // Nilai benar/salah kadang disimpan sebagai teks atau angka.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.isNull()) return false;
 
@@ -83,6 +93,7 @@ template <typename TContainer>
 JsonArrayConst readArrayField(const TContainer& container, const char* primary,
                               const char* legacy,
                               bool* usedLegacy = nullptr) {
+  // Ambil data yang bentuknya daftar.
   JsonVariantConst value = getField(container, primary, legacy, usedLegacy);
   if (value.is<JsonArrayConst>()) return value.as<JsonArrayConst>();
   return JsonArrayConst();
@@ -90,32 +101,45 @@ JsonArrayConst readArrayField(const TContainer& container, const char* primary,
 }  // namespace
 
 AppConfig::AppConfig() {
+  // Nilai default ini dipakai saat konfigurasi belum ada atau rusak.
+  // Artinya, alat tetap punya patokan awal yang aman.
   for (auto& network : wifiNetworks) {
+    // Kosongkan semua slot WiFi dulu.
     network.ssid = "";
     network.password = "";
     network.enabled = false;
   }
 
   for (auto& user : users) {
+    // Kosongkan semua slot pengguna dulu.
     user.userId = "";
     user.displayName = "";
     user.pinHash = "";
     user.enabled = false;
   }
 
+  // Siapkan admin bawaan.
   users[0].userId = "admin";
   users[0].displayName = "Administrator";
   users[0].pinHash = DEFAULT_ADMIN_HASH;
   users[0].enabled = true;
 
+  // Setelan sensor dan cloud bawaan.
   sensorReadIntervalSec = 5;
   cloudSendIntervalSec = 60;
+  // Batas termal bawaan.
   warnThresholdC = 27.0f;
   stage2ThresholdC = 28.0f;
+  warnHumPct = 65.0f;
+  stage2HumPct = 75.0f;
+  // Kipas pertama aktif dari dasar.
   fan1BaselineOn = true;
+  // Batas salah PIN dan waktu kunci.
   maxFailedAttempts = 3;
   keypadLockoutSec = 120;
-  solenoidUnlockSec = 10;
+  // Lama buka solenoid.
+  solenoidUnlockSec = 5;
+  // Alamat layanan cloud dan ID perangkat.
   googleScriptUrl = DEFAULT_GSCRIPT_URL;
   deviceId = DEFAULT_DEVICE_ID;
 }
@@ -123,47 +147,65 @@ AppConfig::AppConfig() {
 ConfigManager::ConfigManager(const char* filename) : _filename(filename) {}
 
 bool ConfigManager::begin() {
+  // LittleFS adalah "memori kecil" di ESP32 untuk menyimpan file konfigurasi.
+  // File di sini dipakai supaya setelan tidak hilang saat alat dimatikan.
   if (!LittleFS.begin(false)) {
+    // Kalau gagal dibuka, coba format dulu.
     Serial.println(F("LittleFS mount failed, formatting"));
     if (!LittleFS.format()) {
+      // Kalau format juga gagal, berhenti.
       Serial.println(F("LittleFS format failed"));
       return false;
     }
     if (!LittleFS.begin(false)) {
+      // Kalau masih gagal, berarti memori memang bermasalah.
       Serial.println(F("LittleFS mount failed after format"));
       return false;
     }
   }
+  // Kalau berhasil, lanjut baca file konfigurasi.
   Serial.println(F("LittleFS mounted"));
   return load();
 }
 
 bool ConfigManager::resetToDefaultsAndSave() {
+  // Kembalikan semua pengaturan ke nilai bawaan lalu simpan.
+  // Ini dipakai kalau file lama rusak atau belum ada.
   data = AppConfig();
   return save();
 }
 
 bool ConfigManager::load() {
+  // Buka file konfigurasi dari memori internal.
+  // Kalau file belum ada, default langsung dibuat.
   File file = LittleFS.open(_filename, "r");
   if (!file) {
+    // Kalau file belum ada, buat dari default.
     Serial.println(F("Config missing, creating defaults"));
     return resetToDefaultsAndSave();
   }
 
+  // Baca isi file ke dokumen JSON.
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, file);
   file.close();
 
   if (err) {
+    // Kalau isi file rusak, balikan ke default.
+    // Lebih baik reset daripada meneruskan data yang salah.
     Serial.printf("Config parse error: %s. Resetting defaults.\n", err.c_str());
     return resetToDefaultsAndSave();
   }
 
+  // Mulai dari nilai bawaan dulu.
+  // Lalu timpa dengan isi file kalau ada.
   data = AppConfig();
 
   bool recognized = false;
   bool migrated = false;
 
+  // WiFi disimpan sebagai daftar, jadi kita baca satu per satu.
+  // Setiap slot dibaca hanya kalau memang ada isinya.
   size_t i = 0;
   for (JsonObjectConst net :
        readArrayField(doc, ConfigKeys::WIFI_NETWORKS, LEGACY_WIFI_NETWORKS,
@@ -183,6 +225,8 @@ bool ConfigManager::load() {
     recognized = true;
   }
 
+  // User juga disimpan sebagai daftar dengan jumlah terbatas.
+  // Slot kosong diabaikan supaya daftar tetap rapi.
   i = 0;
   for (JsonObjectConst user :
        readArrayField(doc, ConfigKeys::USERS, LEGACY_USERS, &migrated)) {
@@ -216,6 +260,12 @@ bool ConfigManager::load() {
   recognized |= readField(doc, ConfigKeys::STAGE2_THRESHOLD,
                           LEGACY_STAGE2_THRESHOLD, data.stage2ThresholdC,
                           &migrated);
+  recognized |= readField(doc, ConfigKeys::WARN_HUM_THRESHOLD,
+                          nullptr, data.warnHumPct,
+                          &migrated);
+  recognized |= readField(doc, ConfigKeys::STAGE2_HUM_THRESHOLD,
+                          nullptr, data.stage2HumPct,
+                          &migrated);
   recognized |= readBoolField(doc, ConfigKeys::FAN1_BASELINE,
                               LEGACY_FAN1_BASELINE, data.fan1BaselineOn,
                               &migrated);
@@ -234,12 +284,15 @@ bool ConfigManager::load() {
                           data.deviceId, &migrated);
 
   if (!recognized) {
+    // Kalau strukturnya tidak dikenali, jangan pakai isi lama.
     Serial.println(F("Config schema unrecognized. Resetting defaults."));
     return resetToDefaultsAndSave();
   }
 
   bool repaired = false;
+  // Pastikan field penting selalu ada walaupun file lama kurang lengkap.
   if (data.googleScriptUrl.length() == 0) {
+    // Kalau alamat cloud kosong, isi dengan bawaan.
     data.googleScriptUrl = DEFAULT_GSCRIPT_URL;
     repaired = true;
   }
@@ -270,8 +323,11 @@ bool ConfigManager::load() {
 
 bool ConfigManager::save() {
   static constexpr const char* TEMP_FILENAME = "/config.tmp";
+  // Buat dokumen JSON baru dari data saat ini.
   JsonDocument doc;
 
+  // Simpan ke file sementara dulu supaya kalau listrik mati di tengah jalan,
+  // file config lama tidak langsung rusak.
   JsonArray wifiArr = doc[ConfigKeys::WIFI_NETWORKS].to<JsonArray>();
   for (const auto& network : data.wifiNetworks) {
     if (network.ssid.length() == 0) continue;
@@ -295,6 +351,8 @@ bool ConfigManager::save() {
   doc[ConfigKeys::CLOUD_INTERVAL] = data.cloudSendIntervalSec;
   doc[ConfigKeys::WARN_THRESHOLD] = data.warnThresholdC;
   doc[ConfigKeys::STAGE2_THRESHOLD] = data.stage2ThresholdC;
+  doc[ConfigKeys::WARN_HUM_THRESHOLD] = data.warnHumPct;
+  doc[ConfigKeys::STAGE2_HUM_THRESHOLD] = data.stage2HumPct;
   doc[ConfigKeys::FAN1_BASELINE] = data.fan1BaselineOn;
   doc[ConfigKeys::MAX_FAILED] = data.maxFailedAttempts;
   doc[ConfigKeys::KEYPAD_LOCKOUT] = data.keypadLockoutSec;
@@ -304,10 +362,12 @@ bool ConfigManager::save() {
 
   File file = LittleFS.open(TEMP_FILENAME, "w");
   if (!file) {
+    // Kalau file tidak bisa dibuka untuk menulis, gagal.
     Serial.println(F("Failed to open config file for writing"));
     return false;
   }
 
+  // Tulis dokumen JSON ke file.
   const size_t written = serializeJson(doc, file);
   file.flush();
   file.close();
@@ -318,6 +378,7 @@ bool ConfigManager::save() {
     return false;
   }
 
+  // Ganti file lama dengan file baru hanya setelah penulisan sukses.
   LittleFS.remove(_filename);
   if (!LittleFS.rename(TEMP_FILENAME, _filename)) {
     Serial.println(F("Failed to replace config file"));
@@ -332,6 +393,7 @@ bool ConfigManager::save() {
 }
 
 bool ConfigManager::formatFileSystem() {
+  // Dipakai saat storage rusak dan perlu dibersihkan total.
   Serial.println(F("Formatting LittleFS and restoring defaults"));
   LittleFS.end();
 
@@ -349,6 +411,7 @@ bool ConfigManager::formatFileSystem() {
 }
 
 bool ConfigManager::addWiFi(const String& ssid, const String& password) {
+  // Kalau SSID sudah ada, kita cukup update password-nya.
   for (auto& network : data.wifiNetworks) {
     if (network.ssid == ssid) {
       network.password = password;
@@ -400,6 +463,7 @@ void ConfigManager::clearAllWiFi() {
 bool ConfigManager::upsertUser(const UserCredential& user) {
   if (user.userId.length() == 0 || user.pinHash.length() == 0) return false;
 
+  // "Upsert" artinya update kalau ada, tambah kalau belum ada.
   for (auto& existing : data.users) {
     if (existing.userId == user.userId) {
       existing.displayName = user.displayName;
@@ -421,6 +485,7 @@ bool ConfigManager::upsertUser(const UserCredential& user) {
 bool ConfigManager::removeUser(const String& userId) {
   for (auto& user : data.users) {
     if (user.userId == userId) {
+      // Jangan hapus user terakhir yang masih aktif, supaya sistem tidak terkunci.
       if (user.enabled && getUserCount() <= 1) {
         Serial.println(F("Refusing to delete last enabled user"));
         return false;

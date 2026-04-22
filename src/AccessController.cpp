@@ -10,6 +10,8 @@ constexpr size_t PIN_MAX_LEN = 8;
 constexpr size_t PIN_MIN_LEN = 4;
 
 String hashPinSha256(const String& pin) {
+  // PIN tidak disimpan apa adanya, tapi diubah jadi kode pengaman.
+  // Jadi kalau memori dibaca orang lain, PIN asli tidak langsung kelihatan.
   uint8_t hash[32];
   mbedtls_sha256_context ctx;
   mbedtls_sha256_init(&ctx);
@@ -28,6 +30,8 @@ String hashPinSha256(const String& pin) {
 }
 
 bool isValidPinFormat(const String& pin) {
+  // PIN harus angka semua dan panjangnya sesuai ketentuan.
+  // Aturan ini dipakai supaya input lebih rapi dan mudah dicek.
   if (pin.length() < PIN_MIN_LEN || pin.length() > PIN_MAX_LEN) return false;
   for (size_t i = 0; i < pin.length(); ++i) {
     if (!isDigit(pin[i])) return false;
@@ -39,6 +43,8 @@ bool isValidPinFormat(const String& pin) {
 void AccessController::begin(ConfigManager* config) {
   _config = config;
 
+  // Susunan tombol disiapkan sekali agar langsung bisa dipakai.
+  // Bagian ini hanya menyiapkan bentuk keypad, bukan membaca tombolnya.
   static char keymap[Pins::KEYPAD_ROWS][Pins::KEYPAD_COLS] = {
       {Pins::KEYPAD_MAP[0][0], Pins::KEYPAD_MAP[0][1], Pins::KEYPAD_MAP[0][2],
        Pins::KEYPAD_MAP[0][3]},
@@ -67,6 +73,7 @@ void AccessController::begin(ConfigManager* config) {
 }
 
 char AccessController::getKey() {
+  // Kalau keypad belum ada, berarti belum bisa baca tombol.
   if (_keypad == nullptr) return NO_KEY;
   return _keypad->getKey();
 }
@@ -75,22 +82,27 @@ bool AccessController::upsertUser(const String& userId, const String& displayNam
                                   const String& pin, bool enabled,
                                   String& error) {
   error = "";
+  // Semua perubahan pengguna harus melewati pengatur utama.
   if (_config == nullptr) {
     error = "controller not initialized";
     return false;
   }
   if (userId.length() == 0) {
+    // Nama pengguna tidak boleh kosong.
     error = "userId required";
     return false;
   }
   if (!isValidPinFormat(pin)) {
+    // PIN yang salah bentuk langsung ditolak.
     error = "pin must be 4-8 numeric digits";
     return false;
   }
 
   UserCredential user;
   user.userId = userId;
+  // Kalau nama tampil kosong, pakai nama pengguna sebagai gantinya.
   user.displayName = displayName.length() > 0 ? displayName : userId;
+  // Simpan PIN dalam bentuk aman.
   user.pinHash = hashPinSha256(pin);
   user.enabled = enabled;
   if (!_config->upsertUser(user)) {
@@ -102,21 +114,30 @@ bool AccessController::upsertUser(const String& userId, const String& displayNam
 
 AuthResult AccessController::validatePin(const String& pin) {
   AuthResult result;
+  // Kalau pengatur belum siap, PIN tidak bisa diperiksa.
   if (_config == nullptr || !isValidPinFormat(pin)) return result;
 
+  // Kalau cocok dengan salah satu pengguna aktif, akses diterima.
+  // Periksa satu per satu sampai ada yang cocok.
   const String hash = hashPinSha256(pin);
   for (const auto& user : _config->data.users) {
     if (!user.enabled || user.userId.length() == 0) continue;
     if (user.pinHash == hash) {
+      // PIN cocok, jadi akses boleh lanjut.
       result.success = true;
       result.userId = user.userId;
       result.displayName = user.displayName;
+      // Admin adalah pengguna pertama yang tersimpan.
       result.isAdmin = (user.userId == _config->data.users[0].userId);
 
+      // Hitungan salah PIN direset kalau berhasil.
       _failedAttempts = 0;
+      // Pesan singkat untuk layar.
       _lastMessage = "ACCESS GRANTED";
+      // Tandai bahwa pintu harus dibuka.
       _unlockRequested = true;
 
+      // Simpan catatan supaya layar dan cloud tahu.
       AccessEvent event;
       event.type = AccessEventType::AccessGranted;
       event.userId = user.userId;
@@ -130,8 +151,11 @@ AuthResult AccessController::validatePin(const String& pin) {
   }
 
   _failedAttempts++;
+  // Kalau salah, pesan layar ikut berubah.
   _lastMessage = "ACCESS DENIED";
 
+  // Simpan percobaan gagal untuk menghitung batas berikutnya.
+  // Catatan ini dipakai untuk layar dan spreadsheet.
   AccessEvent denied;
   denied.type = AccessEventType::AccessDenied;
   denied.result = "DENIED";
@@ -140,10 +164,13 @@ AuthResult AccessController::validatePin(const String& pin) {
   pushEvent(denied);
 
   if (_config != nullptr && _failedAttempts >= _config->data.maxFailedAttempts) {
+    // Kalau salah terlalu banyak, keypad dikunci sementara.
     _lockoutUntilMs = millis() + (_config->data.keypadLockoutSec * 1000UL);
     _failedAttempts = 0;
+    // Layar menampilkan keadaan penguncian.
     _lastMessage = "LOCKOUT ACTIVE";
 
+    // Catatan ini menandai awal penguncian.
     AccessEvent lockout;
     lockout.type = AccessEventType::LockoutStarted;
     lockout.result = "LOCKOUT";
@@ -160,17 +187,20 @@ AuthResult AccessController::validatePin(const String& pin) {
 bool AccessController::changePin(const String& userId, const String& newPin,
                                  String& error) {
   error = "";
+  // PIN hanya bisa diganti kalau pengatur sudah siap.
   if (_config == nullptr) {
     error = "not initialized";
     return false;
   }
   if (!isValidPinFormat(newPin)) {
+    // PIN baru juga harus mengikuti aturan.
     error = "PIN harus 4-8 digit angka";
     return false;
   }
 
   for (auto& user : _config->data.users) {
     if (user.userId == userId && user.enabled) {
+      // Ganti PIN lama dengan PIN baru yang aman.
       user.pinHash = hashPinSha256(newPin);
       if (_config->save()) return true;
       error = "gagal menyimpan";
@@ -182,6 +212,8 @@ bool AccessController::changePin(const String& userId, const String& newPin,
 }
 
 String AccessController::generateUserId() const {
+  // Buat nama pengguna otomatis yang belum dipakai.
+  // Ini dipakai saat admin menambah pengguna baru.
   if (_config == nullptr) return "user01";
   for (int i = 1; i <= 99; ++i) {
     char buf[8];
@@ -200,26 +232,32 @@ String AccessController::generateUserId() const {
 }
 
 bool AccessController::consumeUnlockRequest() {
+  // Jika belum ada permintaan buka, langsung gagal.
   if (!_unlockRequested) return false;
   _unlockRequested = false;
   return true;
 }
 
 bool AccessController::isLockoutActive() const {
+  // Kondisi terkunci masih aktif kalau waktunya belum selesai.
+  // Waktu ini dihitung dari millis() milik ESP32.
   return _lockoutUntilMs > millis();
 }
 
 uint32_t AccessController::lockoutRemainingSec() const {
+  // Kalau tidak terkunci, sisa waktunya nol.
   if (!isLockoutActive()) return 0;
   return static_cast<uint32_t>((_lockoutUntilMs - millis()) / 1000UL);
 }
 
 void AccessController::pushEvent(const AccessEvent& event) {
+  // Antrian dijaga agar tidak tumbuh tanpa batas.
   _events.push_back(event);
   if (_events.size() > 50) _events.pop_front();
 }
 
 bool AccessController::popEvent(AccessEvent& outEvent) {
+  // Kalau antrian kosong, tidak ada yang perlu diambil.
   if (_events.empty()) return false;
   outEvent = _events.front();
   _events.pop_front();
@@ -227,6 +265,8 @@ bool AccessController::popEvent(AccessEvent& outEvent) {
 }
 
 void AccessController::update() {
+  // Saat penguncian selesai, kirim penanda agar tampilan ikut menyesuaikan.
+  // Ini dijalankan terus supaya status tidak tertinggal.
   const bool lockoutNow = isLockoutActive();
   if (_lockoutWasActive && !lockoutNow) {
     AccessEvent event;

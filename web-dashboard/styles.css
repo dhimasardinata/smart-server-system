@@ -1,3 +1,5 @@
+/* Variabel warna dan bentuk dipakai bersama agar tampilan konsisten. */
+/* Bagian ini seperti daftar bahan utama untuk seluruh halaman. */
 :root {
     --bg: #06080f;
     --surface: rgba(15, 20, 35, 0.7);
@@ -34,6 +36,8 @@ body {
     min-height: 100vh;
 }
 
+/* Hiasan latar belakang yang lembut. */
+/* Tujuannya supaya halaman tidak terasa kosong atau datar. */
 .noise {
     position: fixed;
     inset: 0;
@@ -75,6 +79,8 @@ body {
     100% { transform: translate(5%, 5%) scale(1.08); }
 }
 
+/* Wadah utama halaman. */
+/* Semua panel diletakkan di dalam kotak besar ini. */
 .app {
     position: relative;
     z-index: 1;
@@ -86,6 +92,8 @@ body {
     gap: 20px;
 }
 
+/* Kotak transparan untuk kartu dan panel. */
+/* Bentuk ini dipakai berulang supaya tampilan tetap satu gaya. */
 .glass {
     background: var(--surface);
     backdrop-filter: blur(20px) saturate(1.2);
@@ -105,6 +113,8 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Bagian kepala halaman. */
+/* Bagian ini selalu terlihat pertama saat halaman dibuka. */
 .header {
     display: flex;
     justify-content: space-between;
@@ -148,6 +158,8 @@ body {
     gap: 10px;
 }
 
+/* Saklar notifikasi. */
+/* Pengguna bisa mematikan atau menyalakan pesan cepat di sini. */
 .toggle {
     display: flex;
     align-items: center;
@@ -201,6 +213,8 @@ body {
     color: var(--text-dim);
 }
 
+/* Tombol umum. */
+/* Semua tombol memakai dasar yang sama agar seragam. */
 .btn {
     font-family: inherit;
     font-weight: 600;
@@ -243,6 +257,8 @@ body {
 
 .btn-primary:active { transform: translateY(0); }
 
+/* Kotak kecil untuk menampilkan status koneksi. */
+/* Ini memberi tanda apakah dashboard sedang tersambung atau tidak. */
 .status-chip {
     display: flex;
     align-items: center;
@@ -289,6 +305,7 @@ body {
     50% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
 }
 
+/* Kotak untuk memasukkan ID spreadsheet. */
 .config {
     padding: 16px 24px;
     animation-delay: 0.1s;
@@ -332,6 +349,7 @@ body {
     box-shadow: 0 0 0 3px rgba(79, 143, 255, 0.15);
 }
 
+/* Susunan bagian isi halaman. */
 .dashboard {
     display: flex;
     flex-direction: column;

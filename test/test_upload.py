@@ -1,7 +1,7 @@
 import requests
 import json
 
-GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzz3_8YqkZwUyZtEdFR7MEVC0pksoArF_B4KlOYuDeKwOctd6fZmMGkL4cmrbcdPxia/exec"
+GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxVuisohtU0X2y6SBJhpR7stwr54dERGWv8wgq9KsjWhxZb-eH541N9pq33luIBhrWH4g/exec"
 
 data = {
     "temperature": 25.5,
